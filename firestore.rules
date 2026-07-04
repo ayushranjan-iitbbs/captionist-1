@@ -1,0 +1,51 @@
+rules_version = '2';
+
+// Captionist Firestore rules.
+// All Captionist collections are suffixed `captionist` so they never collide
+// with the other app sharing this Firebase project.
+//
+// Most reads/writes go through Admin SDK API routes (which bypass these rules),
+// so these rules are a defense-in-depth layer for any direct client access.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // User documents — a user can read their own; writes happen via Admin SDK.
+    match /usercaptionist/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Projects — owner can read; writes happen via Admin SDK (transcribe/editor).
+    match /projectscaptionist/{id} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Public landing content — readable by anyone, writable only via Admin SDK.
+    match /tutorialscaptionist/{id}    { allow read: if true; allow write: if false; }
+    match /testimonialscaptionist/{id} { allow read: if true; allow write: if false; }
+    match /creatorscaptionist/{id}     { allow read: if true; allow write: if false; }
+    match /landingvideoscaptionist/{id}{ allow read: if true; allow write: if false; }
+    match /templatescaptionist/{id}    { allow read: if true; allow write: if false; }
+    match /fontscaptionist/{id}        { allow read: if true; allow write: if false; }
+    match /sitecontentcaptionist/{id}  { allow read: if true; allow write: if false; }
+
+    // Sensitive collections — no direct client access at all.
+    match /couponscaptionist/{id}       { allow read, write: if false; }
+    match /couponusagecaptionist/{id}   { allow read, write: if false; }
+    match /transactionscaptionist/{id}  { allow read, write: if false; }
+    match /otpcaptionist/{id}           { allow read, write: if false; }
+
+    // Default deny.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
