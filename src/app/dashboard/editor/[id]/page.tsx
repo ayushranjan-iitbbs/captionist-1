@@ -33,12 +33,17 @@ interface CaptionStyle {
 
 const DEFAULT_STYLE: CaptionStyle = {
   fontFamily: "'Inter', sans-serif", fontWeight: 800, fontSize: 32,
-  bold: true, italic: false, underline: false, uppercase: true,
-  align: 'left', posX: 4, posY: 82,
+  bold: true, italic: false, underline: false, uppercase: false,
+  align: 'center', posX: 50, posY: 82,
   colorMode: 'solid', color: '#FFFFFF', color2: '#4f8cff',
   dropShadow: true, textStroke: false, background: true,
-  transition: 'fade', letterSpacing: 0, lineHeight: 1.25,
+  transition: 'fade', letterSpacing: 0, lineHeight: 1.35,
 };
+
+/* Devanagari / Indic scripts have no glyphs in Inter etc. — always append a
+   Noto fallback so Hindi/Marathi/Nepali render correctly (preview + export). */
+const SCRIPT_FALLBACK = "'Noto Sans Devanagari', 'Noto Sans', 'Noto Sans Tamil', 'Noto Sans Bengali', sans-serif";
+const withScript = (fam: string) => `${fam}, ${SCRIPT_FALLBACK}`;
 
 const FONTS = [
   { label: 'Inter', family: "'Inter', sans-serif" },
@@ -51,9 +56,10 @@ const FONTS = [
   { label: 'Luckiest Guy', family: "'Luckiest Guy', cursive" },
   { label: 'Archivo Black', family: "'Archivo Black', sans-serif" },
   { label: 'Playfair Display', family: "'Playfair Display', serif" },
+  { label: 'Noto Sans Devanagari', family: "'Noto Sans Devanagari', sans-serif" },
 ];
 const GOOGLE_FONTS_HREF =
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Poppins:wght@400;600;700;800&family=Montserrat:wght@400;600;700;800&family=Roboto:wght@400;500;700&family=Oswald:wght@400;600;700&family=Bebas+Neue&family=Anton&family=Luckiest+Guy&family=Archivo+Black&family=Playfair+Display:wght@600;700;800&display=swap';
+  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Poppins:wght@400;600;700;800&family=Montserrat:wght@400;600;700;800&family=Roboto:wght@400;500;700&family=Oswald:wght@400;600;700&family=Bebas+Neue&family=Anton&family=Luckiest+Guy&family=Archivo+Black&family=Playfair+Display:wght@600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700;800;900&family=Noto+Sans:wght@400;600;700;800&display=swap';
 
 const WEIGHTS = [
   { label: 'Regular', value: 400 }, { label: 'Medium', value: 500 },
@@ -97,7 +103,6 @@ function waveHeights(count: number): number[] {
   return out;
 }
 
-/* wrap text into lines that fit maxWidth (for canvas export) */
 function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -111,6 +116,16 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
   return lines.length ? lines : [text];
 }
 
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 /* ───────────────────────────── component ─────────────────────────────── */
 
 export default function EditorPage() {
@@ -122,7 +137,6 @@ export default function EditorPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  // audio graph (created once per video element)
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioSrcRef = useRef<MediaElementAudioSourceNode | null>(null);
   const audioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
@@ -181,15 +195,11 @@ export default function EditorPage() {
       const res = await authFetch(`/api/projects/${id}`);
       if (res.ok) {
         const { project: p } = await res.json();
-        setProject(p);
-        setTitle(p.title);
+        setProject(p); setTitle(p.title);
         setSegments((p.transcript?.segments || []) as Seg[]);
         if (p.style) setStyle({ ...DEFAULT_STYLE, ...p.style });
         setDuration(p.durationSeconds || 0);
-      } else {
-        toast.error('Could not load project');
-        router.replace('/dashboard/projects');
-      }
+      } else { toast.error('Could not load project'); router.replace('/dashboard/projects'); }
       setLoading(false);
     })();
   }, [id, router]);
@@ -203,8 +213,7 @@ export default function EditorPage() {
   }, [segments]);
 
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
+    const v = videoRef.current; if (!v) return;
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onMeta = () => { if (v.duration && isFinite(v.duration)) setDuration(v.duration); };
@@ -213,8 +222,7 @@ export default function EditorPage() {
   }, [project?.videoUrl]);
 
   useEffect(() => {
-    const el = timelineRef.current;
-    if (!el) return;
+    const el = timelineRef.current; if (!el) return;
     const x = current * pxPerSec;
     if (x < el.scrollLeft + 60 || x > el.scrollLeft + el.clientWidth - 120) el.scrollLeft = Math.max(0, x - el.clientWidth / 2);
   }, [current, pxPerSec]);
@@ -249,7 +257,7 @@ export default function EditorPage() {
   const safeName = (title || 'captions').replace(/[^\w-]+/g, '_');
   const cleanAudio = () => toast.success('Audio enhancement is applied at export time.');
 
-  /* ── canvas caption renderer (full, wrapped, non-clipping) ── */
+  /* ── canvas caption renderer: multi-line, wrapped, script-safe, never clips ── */
   const drawExportFrame = (ctx: CanvasRenderingContext2D, W: number, H: number, time: number) => {
     const v = videoRef.current;
     if (v && v.readyState >= 2) ctx.drawImage(v, 0, 0, W, H);
@@ -260,39 +268,29 @@ export default function EditorPage() {
     if (!text) return;
     if (style.uppercase) text = text.toUpperCase();
 
-    const scale = H / 720;                       // scale styling to real resolution
-    let fs = style.fontSize * scale * 1.6;
+    const scale = H / 720;
+    const fs = style.fontSize * scale * 1.5;
     const weight = style.bold ? Math.max(style.fontWeight, 700) : style.fontWeight;
-    ctx.font = `${style.italic ? 'italic ' : ''}${weight} ${fs}px ${style.fontFamily}`;
+    ctx.font = `${style.italic ? 'italic ' : ''}${weight} ${fs}px ${withScript(style.fontFamily)}`;
     ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left';
+    ctx.textAlign = style.align;
 
-    const maxW = W * 0.94;
-    while (fs > 12 && ctx.measureText(text).width > maxW) {
-      fs -= 1;
-      ctx.font = `${style.italic ? 'italic ' : ''}${weight} ${fs}px ${style.fontFamily}`;
-    }
-    const textWidth = Math.min(ctx.measureText(text).width, maxW);
-    const lh = fs * Math.max(style.lineHeight, 1.15);
-    const blockH = lh;
-    const cx = W * 0.02;
+    const maxW = W * 0.9;
+    const lines = wrapLines(ctx, text, maxW);
+    const lh = fs * Math.max(style.lineHeight, 1.4);   // headroom for Devanagari matras
+    const blockH = lines.length * lh;
+
+    const cx = W * (style.posX / 100);
     let cy = H * (style.posY / 100);
-    cy = Math.min(H - blockH / 2 - 8, Math.max(blockH / 2 + 8, cy));
+    cy = Math.min(H - blockH / 2 - 12 * scale, Math.max(blockH / 2 + 12 * scale, cy)); // clamp on-screen
 
-    if (style.background) {
-      const padX = fs * 0.35, padY = fs * 0.22;
-      const bw = textWidth + padX * 2, bh = blockH + padY * 2;
-      const bx = cx - padX;
+    if (style.background && style.colorMode !== 'gradient') {
+      const padX = fs * 0.4, padY = fs * 0.3;
+      const widest = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width)));
+      const bw = widest + padX * 2, bh = blockH + padY * 2;
+      const bx = style.align === 'left' ? cx - padX : style.align === 'right' ? cx - bw + padX : cx - bw / 2;
       ctx.fillStyle = 'rgba(0,0,0,0.72)';
-      const r = fs * 0.25;
-      const by = cy - bh / 2;
-      ctx.beginPath();
-      ctx.moveTo(bx + r, by);
-      ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
-      ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
-      ctx.arcTo(bx, by + bh, bx, by, r);
-      ctx.arcTo(bx, by, bx + bw, by, r);
-      ctx.closePath(); ctx.fill();
+      roundRect(ctx, bx, cy - bh / 2, bw, bh, fs * 0.25); ctx.fill();
     }
 
     if (style.dropShadow) { ctx.shadowColor = 'rgba(0,0,0,.85)'; ctx.shadowBlur = 18 * scale; ctx.shadowOffsetY = 4 * scale; }
@@ -302,9 +300,12 @@ export default function EditorPage() {
       const g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(0, style.color); g.addColorStop(1, style.color2); ctx.fillStyle = g;
     } else ctx.fillStyle = style.color;
 
-    const y = cy;
-    if (style.textStroke) { ctx.lineWidth = Math.max(2, fs * 0.06); ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.strokeText(text, cx, y); }
-    ctx.fillText(text, cx, y);
+    const startY = cy - blockH / 2 + lh / 2;
+    lines.forEach((ln, i) => {
+      const y = startY + i * lh;
+      if (style.textStroke) { ctx.lineWidth = Math.max(2, fs * 0.06); ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.lineJoin = 'round'; ctx.strokeText(ln, cx, y); }
+      ctx.fillText(ln, cx, y);
+    });
     ctx.shadowColor = 'transparent';
   };
 
@@ -315,16 +316,12 @@ export default function EditorPage() {
         const ctx = new Ctx();
         const src = ctx.createMediaElementSource(video);
         const dest = ctx.createMediaStreamDestination();
-        src.connect(dest);
-        src.connect(ctx.destination); // keep normal playback audible
+        src.connect(dest); src.connect(ctx.destination);
         audioCtxRef.current = ctx; audioSrcRef.current = src; audioDestRef.current = dest;
       }
       audioCtxRef.current.resume().catch(() => {});
       return audioDestRef.current!.stream.getAudioTracks();
-    } catch (e) {
-      console.warn('[export] audio unavailable:', e);
-      return [];
-    }
+    } catch (e) { console.warn('[export] audio unavailable:', e); return []; }
   };
 
   const downloadVideo = async () => {
@@ -337,12 +334,8 @@ export default function EditorPage() {
     const ctx = canvas.getContext('2d');
     if (!ctx) { toast.error('Canvas unavailable'); return; }
 
-    // Taint check — if the video is cross-origin without CORS, bail early with guidance.
     try { ctx.drawImage(video, 0, 0, W, H); canvas.toDataURL(); }
-    catch {
-      toast.error('Cannot export: enable CORS on your Storage bucket (see setup) and reload.');
-      return;
-    }
+    catch { toast.error('Cannot export: enable CORS on your Storage bucket, then hard-reload.'); return; }
 
     const canvasStream = canvas.captureStream?.(30);
     if (!canvasStream) { toast.error('Browser does not support canvas capture'); return; }
@@ -353,10 +346,8 @@ export default function EditorPage() {
     const wasTime = video.currentTime, wasPaused = video.paused;
 
     try {
-      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
-        ? 'video/webm;codecs=vp8' : 'video/webm';
+      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm';
       const recorder = new MediaRecorder(outputStream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
       const chunks: BlobPart[] = [];
       recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
@@ -371,55 +362,49 @@ export default function EditorPage() {
         setExportPct(Math.min(99, Math.round((video.currentTime / (video.duration || totalDur)) * 100)));
         raf = requestAnimationFrame(loop);
       };
-
       recorder.start(100);
       raf = requestAnimationFrame(loop);
       video.currentTime = 0;
       await video.play();
-
-      await new Promise<void>((resolve) => {
-        const end = () => { video.removeEventListener('ended', end); resolve(); };
-        video.addEventListener('ended', end);
-      });
-
-      recorder.stop();
-      cancelAnimationFrame(raf);
+      await new Promise<void>((resolve) => { const end = () => { video.removeEventListener('ended', end); resolve(); }; video.addEventListener('ended', end); });
+      recorder.stop(); cancelAnimationFrame(raf);
       const blob = await done;
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `${safeName}.webm`; a.click();
-      URL.revokeObjectURL(url);
+      const a = document.createElement('a'); a.href = url; a.download = `${safeName}.webm`; a.click(); URL.revokeObjectURL(url);
       toast.success('Captioned video downloaded');
-    } catch (e: any) {
-      toast.error(e?.message || 'Export failed');
-    } finally {
-      video.pause(); video.currentTime = wasTime; if (!wasPaused) video.play().catch(() => {});
-      setVideoDownloading(false); setExportPct(0);
-    }
+    } catch (e: any) { toast.error(e?.message || 'Export failed'); }
+    finally { video.pause(); video.currentTime = wasTime; if (!wasPaused) video.play().catch(() => {}); setVideoDownloading(false); setExportPct(0); }
   };
 
-  /* ── live preview overlay (non-clipping, wraps) ── */
+  /* ── live preview: flex wrapper + inline-block box, wraps, never clips ── */
   const activeText = activeIdx >= 0 ? segments[activeIdx]?.text : '';
   const overlayText = style.uppercase ? (activeText || '').toUpperCase() : activeText;
-  const captionColor = style.colorMode === 'gradient' ? 'transparent' : style.color;
-  const overlayStyle: React.CSSProperties = {
-    position: 'absolute', left: '2%', top: `${style.posY}%`,
-    transform: 'translate(0,-50%)',
-    width: '96%',
-    fontFamily: style.fontFamily, fontWeight: style.bold ? Math.max(style.fontWeight, 700) : style.fontWeight,
-    fontSize: `clamp(14px, ${style.fontSize / 12}vw, ${style.fontSize * 1.35}px)`,
+  const useGradient = style.colorMode === 'gradient';
+
+  const overlayWrap: React.CSSProperties = {
+    position: 'absolute', left: 0, right: 0, top: `${style.posY}%`,
+    transform: 'translateY(-50%)',
+    display: 'flex',
+    justifyContent: style.align === 'left' ? 'flex-start' : style.align === 'right' ? 'flex-end' : 'center',
+    padding: '0 4%', pointerEvents: 'none',
+  };
+  const overlayInner: React.CSSProperties = {
+    maxWidth: '100%',
+    fontFamily: withScript(style.fontFamily),
+    fontWeight: style.bold ? Math.max(style.fontWeight, 700) : style.fontWeight,
+    fontSize: `clamp(15px, ${style.fontSize / 11}vw, ${style.fontSize * 1.4}px)`,
     fontStyle: style.italic ? 'italic' : 'normal',
     textDecoration: style.underline ? 'underline' : 'none',
-    textAlign: 'left', letterSpacing: `${style.letterSpacing}px`, lineHeight: Math.max(style.lineHeight, 1.2),
-    color: captionColor,
-    ...(style.colorMode === 'gradient'
-      ? { backgroundImage: `linear-gradient(90deg, ${style.color}, ${style.color2})`, WebkitBackgroundClip: 'text', backgroundClip: 'text' as any }
-      : {}),
-    background: style.background ? 'rgba(0,0,0,0.72)' : 'transparent',
-    padding: style.background ? '0.3em 0.6em' : 0,
-    borderRadius: style.background ? '0.5em' : 0,
-    textShadow: style.dropShadow ? '0 4px 18px rgba(0,0,0,.8)' : 'none',
-    WebkitTextStroke: style.textStroke ? '1.5px rgba(0,0,0,.9)' : (undefined as any),
-    pointerEvents: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip',
+    textAlign: style.align, letterSpacing: `${style.letterSpacing}px`,
+    lineHeight: Math.max(style.lineHeight, 1.35),
+    color: useGradient ? 'transparent' : style.color,
+    ...(useGradient ? { backgroundImage: `linear-gradient(90deg, ${style.color}, ${style.color2})`, WebkitBackgroundClip: 'text', backgroundClip: 'text' as any } : {}),
+    background: (style.background && !useGradient) ? 'rgba(0,0,0,0.72)' : 'transparent',
+    padding: (style.background && !useGradient) ? '0.3em 0.65em' : 0,
+    borderRadius: (style.background && !useGradient) ? '0.5em' : 0,
+    textShadow: style.dropShadow ? '0 4px 18px rgba(0,0,0,.85)' : 'none',
+    WebkitTextStroke: style.textStroke ? '1.2px rgba(0,0,0,.9)' : (undefined as any),
+    whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word',
   };
 
   const filtered = segments.map((s, i) => ({ s, i })).filter(({ s }) => !search || s.text.toLowerCase().includes(search.toLowerCase()));
@@ -459,7 +444,7 @@ export default function EditorPage() {
             }}>
             <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold"
               style={{ background: i === activeIdx ? 'var(--accent)' : 'var(--editor-panel)', color: i === activeIdx ? '#fff' : 'var(--text-muted)' }}>{i + 1}</span>
-            <input value={s.text} onChange={(e) => updateText(i, e.target.value)} onFocus={() => setSelectedIdx(i)} className="flex-1 bg-transparent text-sm outline-none" />
+            <input value={s.text} onChange={(e) => updateText(i, e.target.value)} onFocus={() => setSelectedIdx(i)} className="flex-1 bg-transparent text-sm outline-none" style={{ fontFamily: withScript("'Inter', sans-serif") }} />
             <button onClick={(e) => { e.stopPropagation(); removeSeg(i); }} className="shrink-0 opacity-0 transition group-hover:opacity-100" style={{ color: '#ef4444' }}><Trash2 size={14} /></button>
           </div>
         ))}
@@ -485,7 +470,7 @@ export default function EditorPage() {
           <div className="space-y-5">
             <div className="surface p-3" style={{ background: 'var(--editor-panel)' }}>
               <div className="mb-2 flex items-center justify-between"><span className="text-xs font-bold">Editing Line</span><span className="text-[11px]" style={{ color: 'var(--accent)' }}>select a caption</span></div>
-              <input value={selectedIdx >= 0 ? segments[selectedIdx]?.text ?? '' : ''} onChange={(e) => selectedIdx >= 0 && updateText(selectedIdx, e.target.value)} placeholder="Edit line text…" className="input !py-2.5 text-sm" />
+              <input value={selectedIdx >= 0 ? segments[selectedIdx]?.text ?? '' : ''} onChange={(e) => selectedIdx >= 0 && updateText(selectedIdx, e.target.value)} placeholder="Edit line text…" className="input !py-2.5 text-sm" style={{ fontFamily: withScript("'Inter', sans-serif") }} />
               <button onClick={() => setSelectedIdx(-1)} className="btn-ghost mt-2 w-full !py-2 text-xs">Clear Selection</button>
             </div>
 
@@ -578,7 +563,7 @@ export default function EditorPage() {
                   <div className="mb-3 flex items-center justify-between"><span className="font-bold">{t.name}</span><span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{t.tag || 'Custom'}</span></div>
                   <div className="grid h-16 place-items-center rounded-xl" style={{ background: 'var(--editor-panel)' }}>
                     <span style={{
-                      fontFamily: patch.fontFamily, fontWeight: patch.fontWeight,
+                      fontFamily: withScript(patch.fontFamily), fontWeight: patch.fontWeight,
                       color: patch.colorMode === 'gradient' ? 'transparent' : patch.color,
                       backgroundImage: patch.colorMode === 'gradient' ? `linear-gradient(90deg, ${patch.color}, ${patch.color2})` : undefined,
                       WebkitBackgroundClip: patch.colorMode === 'gradient' ? 'text' : undefined,
@@ -667,7 +652,7 @@ export default function EditorPage() {
 
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="editor-scroll min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-            <div ref={stageRef} className="relative mx-auto aspect-video w-full max-w-3xl overflow-visible rounded-2xl border bg-black" style={{ borderColor: 'var(--editor-border)' }}>
+            <div ref={stageRef} className="relative mx-auto aspect-video w-full max-w-3xl overflow-hidden rounded-2xl border bg-black" style={{ borderColor: 'var(--editor-border)' }}>
               {project?.videoUrl ? (
                 <>
                   <video ref={videoRef} src={project.videoUrl} crossOrigin="anonymous" onTimeUpdate={onTime} playsInline className="h-full w-full object-contain" />
@@ -679,9 +664,11 @@ export default function EditorPage() {
               <div className="absolute left-3 top-3"><span className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: 'rgba(0,0,0,.55)', color: '#fff' }}><RefreshCw size={12} /> Replace</span></div>
               <div className="absolute right-3 top-3"><span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: 'rgba(0,0,0,.55)', color: '#f5b74f' }}>● Low-res</span></div>
               {overlayText ? (
-                <div key={`${activeIdx}-${style.transition}`} className={ANIM_CLASS[style.transition]} style={overlayStyle}>{overlayText}</div>
+                <div key={`${activeIdx}-${style.transition}`} style={overlayWrap}>
+                  <span className={ANIM_CLASS[style.transition]} style={overlayInner}>{overlayText}</span>
+                </div>
               ) : (
-                <div style={{ ...overlayStyle, color: 'var(--text-muted)', background: 'rgba(0,0,0,.4)' }}>Preview appears here</div>
+                <div style={overlayWrap}><span style={{ ...overlayInner, color: 'var(--text-muted)', background: 'rgba(0,0,0,.4)' }}>Preview appears here</span></div>
               )}
             </div>
 
@@ -722,7 +709,7 @@ export default function EditorPage() {
                       const on = b.i === activeIdx;
                       return (
                         <button key={b.key} onClick={(e) => { e.stopPropagation(); setSelectedIdx(b.i); seekTo(b.start); }} className="absolute top-3 flex items-center overflow-hidden rounded-md px-1 text-[10px] font-semibold transition" title={b.text}
-                          style={{ left: b.start * pxPerSec, width: Math.max(6, (b.end - b.start) * pxPerSec - 2), height: 34, background: on ? 'var(--accent)' : 'var(--editor-block)', color: on ? '#fff' : 'var(--text)' }}>
+                          style={{ left: b.start * pxPerSec, width: Math.max(6, (b.end - b.start) * pxPerSec - 2), height: 34, background: on ? 'var(--accent)' : 'var(--editor-block)', color: on ? '#fff' : 'var(--text)', fontFamily: withScript("'Inter', sans-serif") }}>
                           <span className="truncate">{b.text}</span>
                         </button>
                       );
