@@ -34,6 +34,55 @@ export interface TranscriptionResult {
 // OpenAI's Whisper endpoint hard-caps uploads at 25 MB.
 const MAX_BYTES = 25 * 1024 * 1024;
 
+// Maps common language names (and already-valid 2-letter codes) to the
+// ISO-639-1 code Whisper expects via the `language` param.
+const LANG_CODES: Record<string, string> = {
+  english: 'en',
+  spanish: 'es',
+  french: 'fr',
+  german: 'de',
+  italian: 'it',
+  portuguese: 'pt',
+  dutch: 'nl',
+  russian: 'ru',
+  japanese: 'ja',
+  chinese: 'zh',
+  korean: 'ko',
+  arabic: 'ar',
+  hindi: 'hi',
+  turkish: 'tr',
+  polish: 'pl',
+  vietnamese: 'vi',
+  en: 'en',
+  es: 'es',
+  fr: 'fr',
+  de: 'de',
+  it: 'it',
+  pt: 'pt',
+  nl: 'nl',
+  ru: 'ru',
+  ja: 'ja',
+  zh: 'zh',
+  ko: 'ko',
+  ar: 'ar',
+  hi: 'hi',
+  tr: 'tr',
+  pl: 'pl',
+  vi: 'vi',
+};
+
+// Optional priming prompts per language code. Whisper uses the `prompt` field
+// as style/vocabulary context, which also nudges it toward consistent
+// punctuation and casing for that language.
+const PRIMING: Record<string, string> = {
+  en: 'Hello, welcome. This is a transcript with proper punctuation, capitalization, and paragraph breaks.',
+  es: 'Hola, bienvenido. Esta es una transcripcion con puntuacion y mayusculas correctas.',
+  fr: 'Bonjour, bienvenue. Ceci est une transcription avec une ponctuation et des majuscules correctes.',
+  de: 'Hallo, willkommen. Dies ist ein Transkript mit korrekter Zeichensetzung und Grossschreibung.',
+  it: 'Ciao, benvenuto. Questa e una trascrizione con punteggiatura e maiuscole corrette.',
+  pt: 'Ola, bem-vindo. Esta e uma transcricao com pontuacao e maiusculas corretas.',
+};
+
 /**
  * Transcribe an audio/video file with Whisper, returning verbose JSON with
  * per-segment timings (needed for the caption editor + SRT export).
@@ -42,24 +91,40 @@ export async function transcribeFile(
   file: File,
   language?: string
 ): Promise<TranscriptionResult> {
-  if (file.size > MAX_BYTES) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  return transcribeBuffer(buffer, file.name || 'audio.mp4', file.type || 'video/mp4', language);
+}
+
+/**
+ * Transcribe a raw audio/video buffer with Whisper, returning verbose JSON
+ * with per-segment timings (needed for the caption editor + SRT export).
+ */
+export async function transcribeBuffer(
+  buffer: Buffer,
+  filename: string,
+  type: string,
+  language?: string
+): Promise<TranscriptionResult> {
+  if (buffer.byteLength > MAX_BYTES) {
     throw new Error(
-      `File is ${(file.size / 1024 / 1024).toFixed(1)} MB, but OpenAI Whisper accepts a maximum of 25 MB. ` +
-        `Trim the clip or extract the audio first.`
+      `Audio is ${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB, but OpenAI Whisper accepts a maximum of 25 MB. ` +
+        `Use a shorter clip or a lower-bitrate file.`
     );
   }
 
   const openai = getOpenAI();
 
-  // Convert the Web File (from Next's formData) into a Buffer-backed upload via
-  // the SDK's own toFile() helper. Passing the raw formData File straight to the
-  // SDK can break its multipart streaming on Node/Windows and surface as
-  // APIConnectionError / ECONNRESET. A materialized Buffer with an explicit
-  // filename produces a clean, correctly-sized request.
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const upload = await toFile(buffer, file.name || 'audio.mp4', {
-    type: file.type || 'video/mp4',
+  // Convert the raw Buffer into an upload via the SDK's own toFile() helper.
+  // A materialized Buffer with an explicit filename produces a clean,
+  // correctly-sized request (passing a raw Web File can break multipart
+  // streaming on Node/Windows and surface as APIConnectionError / ECONNRESET).
+  const upload = await toFile(buffer, filename || 'audio.mp4', {
+    type: type || 'video/mp4',
   });
+
+  const langInput = (language || '').toLowerCase().trim();
+  const langCode = LANG_CODES[langInput] || (langInput.length === 2 ? langInput : undefined);
+  const prompt = langCode ? PRIMING[langCode] : undefined;
 
   let resp;
   try {
@@ -69,7 +134,8 @@ export async function transcribeFile(
       response_format: 'verbose_json',
       timestamp_granularities: ['segment'],
       temperature: 0,
-      ...(language ? { language } : {}),
+      ...(langCode ? { language: langCode } : {}),
+      ...(prompt ? { prompt } : {}),
     });
   } catch (e: any) {
     // Surface the REAL underlying reason instead of the SDK's opaque
