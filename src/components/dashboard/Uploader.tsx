@@ -3,11 +3,14 @@
 import { useRef, useState } from 'react';
 import { ImagePlus, Loader2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref as storageRef, uploadBytes, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage, auth } from '@/lib/firebaseClient';
 import { v4 as uuid } from 'uuid';
 import { LANGUAGES } from '@/lib/landingDefaults';
 import { useRouter } from 'next/navigation';
+import { extractAudioChunks } from '@/lib/audioExtract';
+
+const MAX_FILE = 1e9; // 1 GB — audio is extracted client-side, so video size no longer hits Whisper's 25 MB cap
 
 export default function Uploader({ onDone }: { onDone?: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -19,9 +22,20 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
 
   const pick = (f: File | null) => {
     if (!f) return;
-    if (f.size > 1e9) return toast.error('Max file size is 1GB');
+    if (f.size > MAX_FILE) return toast.error('Max file size is 1GB');
     if (!/(mp4|mov|quicktime)/i.test(f.type)) return toast.error('Only MP4 / MOV supported');
     setFile(f);
+  };
+
+  const authHeaders = async () => ({
+    Authorization: `Bearer ${await auth.currentUser!.getIdToken()}`,
+    'Content-Type': 'application/json',
+  });
+
+  const parseJson = async (res: Response) => {
+    const raw = await res.text();
+    try { return raw ? JSON.parse(raw) : {}; }
+    catch { return { error: raw?.slice(0, 200) || `Request failed (${res.status})` }; }
   };
 
   const start = async () => {
@@ -30,54 +44,98 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) throw new Error('Not signed in');
+      const base = `captionist/${uid}/${uuid()}`;
 
-      setPhase('Uploading…');
-      const path = `captionist/${uid}/${uuid()}-${file.name}`;
-      const sref = storageRef(storage, path);
-      await uploadBytes(sref, file);
-      const url = await getDownloadURL(sref);
+      /* 1) Extract audio in-browser (16 kHz mono MP3, ~8-min chunks).
+            A 500 MB video becomes a few MB of audio — under Whisper's 25 MB cap. */
+      let chunks;
+      try {
+        chunks = await extractAudioChunks(file, setPhase);
+      } catch (err) {
+        console.warn('[uploader] audio extraction failed:', err);
+        if (file.size > 24 * 1024 * 1024) {
+          throw new Error('Could not read this video\'s audio in the browser, and the file is too large to transcribe directly. Try a standard H.264/AAC MP4.');
+        }
+        chunks = null; // small file → legacy direct path below
+      }
 
-      setPhase('Transcribing…');
-      const token = await auth.currentUser!.getIdToken();
-
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ videoUrl: url, language, title: file.name }),
+      /* 2) Upload the ORIGINAL video (for playback/edit/export) with progress */
+      const vref = storageRef(storage, `${base}-${file.name}`);
+      const task = uploadBytesResumable(vref, file);
+      await new Promise<void>((resolve, reject) => {
+        task.on('state_changed',
+          (s) => setPhase(`Uploading video… ${Math.round((s.bytesTransferred / s.totalBytes) * 100)}%`),
+          reject, () => resolve());
       });
+      const videoUrl = await getDownloadURL(vref);
 
-      // Server may return a non-JSON error body (gateway timeout, 413 text…).
-      // Read as text first, then parse defensively so we never crash on JSON.parse.
-      const raw = await res.text();
-      let data: any = {};
-      try { data = raw ? JSON.parse(raw) : {}; }
-      catch { data = { error: raw?.slice(0, 200) || `Request failed (${res.status})` }; }
-      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      /* 3) Transcribe */
+      if (!chunks) {
+        // Legacy small-file path: server downloads the video itself
+        setPhase('Transcribing…');
+        const res = await fetch('/api/transcribe', {
+          method: 'POST', headers: await authHeaders(),
+          body: JSON.stringify({ videoUrl, language, title: file.name }),
+        });
+        const data = await parseJson(res);
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+        toast.success('Captions ready!');
+        setFile(null); onDone?.();
+        router.push(`/dashboard/editor/${data.project.id}`);
+        return;
+      }
+
+      const allSegments: { start: number; end: number; text: string }[] = [];
+      let detectedLang = language;
+      let totalAudioDur = 0;
+
+      for (let i = 0; i < chunks.length; i++) {
+        const c = chunks[i];
+        setPhase(chunks.length > 1 ? `Transcribing part ${i + 1}/${chunks.length}…` : 'Transcribing…');
+
+        const aref = storageRef(storage, `${base}-audio-${i}.mp3`);
+        await uploadBytes(aref, c.blob, { contentType: 'audio/mpeg' });
+        const audioUrl = await getDownloadURL(aref);
+
+        const res = await fetch('/api/transcribe-chunk', {
+          method: 'POST', headers: await authHeaders(),
+          body: JSON.stringify({ audioUrl, language }),
+        });
+        const data = await parseJson(res);
+        if (!res.ok) throw new Error(data.error || `Chunk ${i + 1} failed (${res.status})`);
+
+        if (data.language && detectedLang === 'auto') detectedLang = data.language;
+        totalAudioDur += c.durationSec;
+        for (const s of data.segments || []) {
+          allSegments.push({ start: s.start + c.offsetSec, end: s.end + c.offsetSec, text: s.text });
+        }
+      }
+
+      /* 4) Create the project from the merged transcript */
+      setPhase('Finishing…');
+      const res = await fetch('/api/projects', {
+        method: 'POST', headers: await authHeaders(),
+        body: JSON.stringify({
+          title: file.name, videoUrl, language: detectedLang,
+          transcript: { segments: allSegments }, durationSeconds: totalAudioDur,
+        }),
+      });
+      const data = await parseJson(res);
+      if (!res.ok) throw new Error(data.error || `Create failed (${res.status})`);
 
       toast.success('Captions ready!');
-      setFile(null);
-      onDone?.();
+      setFile(null); onDone?.();
       router.push(`/dashboard/editor/${data.project.id}`);
     } catch (e: any) {
       toast.error(e?.message || 'Failed to process');
     } finally {
-      setBusy(false);
-      setPhase('');
+      setBusy(false); setPhase('');
     }
   };
 
   return (
     <div className="surface p-6" style={{ background: 'var(--bg-soft)' }}>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="video/mp4,video/quicktime"
-        className="hidden"
-        onChange={(e) => pick(e.target.files?.[0] || null)}
-      />
+      <input ref={inputRef} type="file" accept="video/mp4,video/quicktime" className="hidden" onChange={(e) => pick(e.target.files?.[0] || null)} />
 
       {!file ? (
         <button
@@ -89,7 +147,7 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
         >
           <ImagePlus size={40} style={{ color: 'var(--text-muted)' }} />
           <p className="mt-4 font-medium">Drop your video here or click to upload</p>
-          <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Max: 25 MB audio, 1 GB file</p>
+          <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Up to 1 GB — audio is extracted automatically</p>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Supports: MP4, MOV</p>
         </button>
       ) : (

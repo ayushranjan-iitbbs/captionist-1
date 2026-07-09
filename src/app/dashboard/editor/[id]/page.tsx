@@ -579,18 +579,21 @@ export default function EditorPage() {
     setRendering(true); setPct(0);
     const wasT = video.currentTime, wasP = video.paused;
     try {
-      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+      const mp4Mime = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m));
+      const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+      const mime = mp4Mime || webmMime;
+      const isMp4 = !!mp4Mime;
       const rec = new MediaRecorder(out, { mimeType: mime, videoBitsPerSecond: H >= 1080 ? 12_000_000 : 8_000_000 });
       const chunks: BlobPart[] = []; rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-      const done = new Promise<Blob>((res, rej) => { rec.onstop = () => res(new Blob(chunks, { type: 'video/webm' })); rec.onerror = () => rej(new Error('Recording failed')); });
+      const done = new Promise<Blob>((res, rej) => { rec.onstop = () => res(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' })); rec.onerror = () => rej(new Error('Recording failed')); });
       let raf = 0;
       const loop = () => { drawFrame(ctx, W, H, video.currentTime); setPct(Math.min(99, Math.round((video.currentTime / (video.duration || totalDur)) * 100))); raf = requestAnimationFrame(loop); };
       rec.start(100); raf = requestAnimationFrame(loop); video.currentTime = 0; await video.play();
       await new Promise<void>((r) => { const e = () => { video.removeEventListener('ended', e); r(); }; video.addEventListener('ended', e); });
       rec.stop(); cancelAnimationFrame(raf);
       const blob = await done; const u = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = u; a.download = `${safeName}_${H}p.webm`; a.click(); URL.revokeObjectURL(u);
-      toast.success('Render complete');
+      const a = document.createElement('a'); a.href = u; a.download = `${safeName}_${H}p.${isMp4 ? 'mp4' : 'webm'}`; a.click(); URL.revokeObjectURL(u);
+      toast.success(isMp4 ? 'Render complete (MP4)' : 'Render complete (WebM — this browser can\'t record MP4)');
     } catch (e: any) { toast.error(e?.message || 'Render failed'); }
     finally { video.pause(); video.currentTime = wasT; if (!wasP) video.play().catch(() => {}); setRendering(false); setPct(0); }
   };
@@ -1221,6 +1224,33 @@ export default function EditorPage() {
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
 
+  /* drag the middle of a caption block to SHIFT it in time (snaps to neighbours).
+     A click without movement selects + seeks instead. */
+  const startMove = (e: React.PointerEvent, i: number) => {
+    e.stopPropagation();
+    const s0 = segments[i]; if (!s0) return;
+    const sx = e.clientX; const st0 = s0.start; const dur = s0.end - s0.start;
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - sx;
+      if (Math.abs(dx) > 3) moved = true;
+      if (!moved) return;
+      let ns = st0 + dx / pxPerSec;
+      const prevEnd = segments[i - 1]?.end ?? 0;
+      const nextStart = segments[i + 1]?.start ?? totalDur;
+      if (Math.abs(ns - prevEnd) < 0.12) ns = prevEnd;                    // snap to previous block
+      if (Math.abs(ns + dur - nextStart) < 0.12) ns = nextStart - dur;    // snap to next block
+      ns = Math.max(0, Math.min(totalDur - dur, ns));
+      setSegments((prev) => prev.map((s, x) => (x === i ? { ...s, start: ns, end: ns + dur } : s)));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      if (moved) markDirty();
+      else { setSelLine(i); setSelWords(new Set()); seekTo(segments[i].start); }
+    };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--editor-bg)', color: 'var(--text)' }}>
       <header className="flex items-center justify-between gap-3 border-b px-3 py-2.5 sm:px-4" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>
@@ -1330,8 +1360,14 @@ export default function EditorPage() {
                 onClick={(e) => { const el = tlRef.current; if (!el) return; const r = el.getBoundingClientRect(); const x = e.clientX - r.left + el.scrollLeft; seekTo(Math.max(0, Math.min(totalDur, x / pxPerSec))); }}>
                 <div className="relative" style={{ width: tlWidth, minHeight: 190 }}>
                   <div className="relative h-7 border-b" style={{ borderColor: 'var(--editor-border)' }}>
+                    {pxPerSec >= 14 && Array.from({ length: Math.ceil(totalDur) + 1 }).map((_, i) =>
+                      i % 5 !== 0 ? (<span key={`t${i}`} className="absolute bottom-0 h-1.5 w-px" style={{ left: i * pxPerSec, background: 'var(--editor-border)' }} />) : null
+                    )}
                     {Array.from({ length: Math.ceil(totalDur / 5) + 1 }).map((_, i) => (
-                      <span key={i} className="absolute top-1.5 text-[10px] tabular-nums" style={{ left: i * 5 * pxPerSec + 4, color: 'var(--text-muted)' }}>{clockLbl(i * 5)}</span>
+                      <span key={i}>
+                        <span className="absolute bottom-0 h-2.5 w-px" style={{ left: i * 5 * pxPerSec, background: 'var(--text-muted)' }} />
+                        <span className="absolute top-1 text-[10px] tabular-nums" style={{ left: i * 5 * pxPerSec + 4, color: 'var(--text-muted)' }}>{clockLbl(i * 5)}</span>
+                      </span>
                     ))}
                   </div>
 
@@ -1356,25 +1392,28 @@ export default function EditorPage() {
                       : segments.map((s, i) => {
                           const on = i === activeIdx, sel = i === selLine;
                           return (
-                            <div key={s.id} onClick={(e) => { e.stopPropagation(); setSelLine(i); setSelWords(new Set()); seekTo(s.start); }}
-                              className="absolute top-4 flex cursor-pointer items-center rounded-md text-[10px] font-semibold" title={s.text}
-                              style={{ left: s.start * pxPerSec, width: Math.max(12, (s.end - s.start) * pxPerSec - 2), height: 40,
-                                background: on ? 'var(--accent)' : 'var(--editor-block)', color: on ? '#fff' : 'var(--text)',
-                                outline: sel ? '2px solid var(--accent)' : 'none', fontFamily: withScript("'Inter',sans-serif") }}>
-                              <span onPointerDown={(e) => startEdge(e, i, 'start')} className="h-full w-1.5 shrink-0 cursor-ew-resize rounded-l-md" style={{ background: 'rgba(255,255,255,.28)' }} />
-                              <span className="min-w-0 flex-1 truncate px-1">{shown(s)}</span>
-                              <span onPointerDown={(e) => startEdge(e, i, 'end')} className="h-full w-1.5 shrink-0 cursor-ew-resize rounded-r-md" style={{ background: 'rgba(255,255,255,.28)' }} />
+                            <div key={s.id} onClick={(e) => e.stopPropagation()}
+                              className="absolute top-3 flex items-stretch rounded-lg text-[10px] font-semibold" title={s.text}
+                              style={{ left: s.start * pxPerSec, width: Math.max(14, (s.end - s.start) * pxPerSec - 2), height: 44,
+                                background: on ? 'var(--accent)' : 'linear-gradient(180deg, rgba(79,140,255,.30), rgba(79,140,255,.14))',
+                                border: on ? '1px solid var(--accent)' : '1px solid rgba(79,140,255,.35)',
+                                color: on ? '#fff' : 'var(--text)',
+                                boxShadow: sel ? '0 0 0 2px var(--accent), 0 4px 14px rgba(0,0,0,.35)' : '0 2px 8px rgba(0,0,0,.2)',
+                                fontFamily: withScript("'Inter',sans-serif") }}>
+                              <span onPointerDown={(e) => startEdge(e, i, 'start')} className="w-2 shrink-0 cursor-ew-resize rounded-l-lg" style={{ background: 'rgba(255,255,255,.22)' }} />
+                              <span onPointerDown={(e) => startMove(e, i)} className="flex min-w-0 flex-1 cursor-grab items-center px-1.5 active:cursor-grabbing"><span className="truncate">{shown(s)}</span></span>
+                              <span onPointerDown={(e) => startEdge(e, i, 'end')} className="w-2 shrink-0 cursor-ew-resize rounded-r-lg" style={{ background: 'rgba(255,255,255,.22)' }} />
                             </div>
                           );
                         })}
                   </div>
 
-                  <div className="flex h-20 items-center gap-px px-px" style={{ background: 'var(--editor-panel)' }}>
-                    {heights.map((h, i) => (<span key={i} className="inline-block rounded-full" style={{ width: Math.max(1, tlWidth / heights.length - 1), height: `${h * 100}%`, background: 'var(--accent)', opacity: 0.6 }} />))}
+                  <div className="flex h-20 items-center gap-[2px] px-1" style={{ background: 'var(--editor-panel)' }}>
+                    {heights.map((h, i) => (<span key={i} className="inline-block rounded-full" style={{ width: Math.max(1.5, tlWidth / heights.length - 2), height: `${h * 100}%`, background: 'linear-gradient(180deg, var(--accent) 0%, rgba(79,140,255,.4) 100%)', opacity: 0.9 }} />))}
                   </div>
 
-                  <div className="pointer-events-none absolute inset-y-0" style={{ left: current * pxPerSec }}>
-                    <div className="h-full w-0.5" style={{ background: 'var(--accent)' }} />
+                  <div className="pointer-events-none absolute inset-y-0 z-10" style={{ left: current * pxPerSec }}>
+                    <div className="h-full w-0.5" style={{ background: 'var(--accent)', boxShadow: '0 0 10px var(--accent)' }} />
                     <div className="absolute -left-2 -top-0.5 h-3.5 w-4" style={{ background: 'var(--accent)', clipPath: 'polygon(0 0,100% 0,50% 100%)' }} />
                   </div>
                 </div>
