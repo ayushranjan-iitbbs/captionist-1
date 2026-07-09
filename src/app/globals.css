@@ -15,13 +15,13 @@
   --text-muted: #5b6473;
   --accent: #2563eb;
   --accent-soft: #3b82f6;
-  --editor-panel: #f2f6fb;
-  --editor-border: #d7e2f0;
+
+  /* Editor surfaces */
+  --editor-bg: #f3f6fc;
   --editor-surface: #ffffff;
-  --editor-muted: #6b7280;
-  --editor-accent: #2563eb;
-  --navbar-bg: rgba(255, 255, 255, 0.86);
-  --hero-grid: rgba(37, 99, 235, 0.12);
+  --editor-panel: #f7f9fc;
+  --editor-border: #e6eaf2;
+  --editor-block: #dbe6ff;
 }
 
 .dark {
@@ -33,13 +33,13 @@
   --text-muted: #9aa3b2;
   --accent: #4f8cff;
   --accent-soft: #6ea8ff;
-  --editor-panel: #12121a;
-  --editor-border: #2b2b35;
-  --editor-surface: #191923;
-  --editor-muted: #9aa3b2;
-  --editor-accent: #4f8cff;
-  --navbar-bg: rgba(20, 20, 26, 0.6);
-  --hero-grid: rgba(111, 168, 255, 0.14);
+
+  /* Editor surfaces */
+  --editor-bg: #060609;
+  --editor-surface: #101017;
+  --editor-panel: #0b0b11;
+  --editor-border: #20202a;
+  --editor-block: #2a3550;
 }
 
 * {
@@ -118,14 +118,50 @@ body {
     background-clip: text;
     color: transparent;
   }
+}
 
-  .hero-grid-overlay {
-    background-image:
-      linear-gradient(to right, var(--hero-grid) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--hero-grid) 1px, transparent 1px);
-    background-size: 32px 32px;
-    mask-image: radial-gradient(ellipse at center, black 45%, transparent 78%);
-    -webkit-mask-image: radial-gradient(ellipse at center, black 45%, transparent 78%);
-    opacity: 0.7;
-  }
+/* ── Editor caption transition animations ───────────────────────── */
+@keyframes capFade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes capPop { 0% { opacity: 0; transform: scale(.4) } 65% { opacity: 1; transform: scale(1.15) } 100% { opacity: 1; transform: scale(1) } }
+@keyframes capZoom { from { opacity: 0; transform: scale(1.7) } to { opacity: 1; transform: scale(1) } }
+@keyframes capScale { from { opacity: .3; transform: scale(.55) } to { opacity: 1; transform: scale(1) } }
+@keyframes capSlideX { from { opacity: 0; transform: translateX(-56px) } to { opacity: 1; transform: translateX(0) } }
+@keyframes capSlideY { from { opacity: 0; transform: translateY(48px) } to { opacity: 1; transform: translateY(0) } }
+.cap-fade { animation: capFade .3s ease both }
+.cap-pop { animation: capPop .4s cubic-bezier(.2,1.4,.4,1) both }
+.cap-zoom { animation: capZoom .35s ease both }
+.cap-scale { animation: capScale .4s ease both }
+.cap-slide { animation: capSlideX .4s ease both }
+.cap-slideup { animation: capSlideY .4s ease both }
+
+/* thin scrollbars inside the editor */
+.editor-scroll::-webkit-scrollbar { width: 8px; height: 8px }
+.editor-scroll::-webkit-scrollbar-thumb { background: var(--editor-border); border-radius: 8px }
+.editor-scroll::-webkit-scrollbar-track { background: transparent }
+
+/* Video seek bar (thin line above player controls) */
+.seekbar {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+.seekbar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 999px;
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+.seekbar::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border-radius: 999px;
+  background: #fff;
+  border: none;
 }
