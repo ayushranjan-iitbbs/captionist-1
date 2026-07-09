@@ -8,9 +8,18 @@ export function ProjectCard({ project }: { project: Project }) {
   return (
     <Link href={`/dashboard/editor/${project.id}`} className="group block">
       <div className="surface relative aspect-video overflow-hidden" style={{ background: 'var(--bg-soft)' }}>
-        {project.thumbnailUrl ? (
+        {project.thumbnailUrl || project.posterUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={project.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+          <img src={project.thumbnailUrl || project.posterUrl} alt="" className="h-full w-full object-cover" />
+        ) : project.videoUrl ? (
+          <video
+            src={project.videoUrl}
+            muted
+            autoPlay
+            loop
+            playsInline
+            className="h-full w-full object-cover"
+          />
         ) : (
           <div className="grid h-full w-full place-items-center">
             <span className="text-4xl font-bold gradient-text opacity-30">C</span>

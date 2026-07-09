@@ -8,42 +8,56 @@ import toast from 'react-hot-toast';
 import type { Project } from '@/types';
 import {
   ArrowLeft, Download, FileText, Loader2, Save, Trash2, Search, Settings2,
-  Play, Pause, Volume2, VolumeX, Maximize2, ZoomIn, ZoomOut, RefreshCw,
-  Type as TypeIcon, Music, Captions as CaptionsIcon, Sparkles, Plus,
-  ChevronLeft, ChevronRight, Wand2, LayoutTemplate, Layers, X, PanelLeft, PanelRight,
+  Play, Pause, Volume2, VolumeX, Maximize2, ZoomIn, ZoomOut, RotateCcw,
+  Sparkles, Plus, ChevronLeft, ChevronRight, X, ChevronDown, ChevronUp,
+  Eraser, Clock, LayoutGrid, Palette, Check, Ban, Circle, Search as SearchIcon,
+  ChevronsLeft, ChevronsUp, MoveHorizontal, ZoomIn as ZoomIcon, Type as TypeIcon,
+  Volume2 as SpeakerIcon, Zap, Languages, Bookmark, AlignLeft, AlignCenter, AlignRight,
 } from 'lucide-react';
 
-/* ─────────────────────────── types & helpers ─────────────────────────── */
+/* ══════════════════════ types ══════════════════════ */
 
-interface Seg { id: number; start: number; end: number; text: string }
-
-interface CaptionStyle {
-  fontFamily: string;
-  fontWeight: number;
-  fontSize: number;
+interface Seg {
+  id: number; start: number; end: number; text: string;
+  style?: Partial<CapStyle>;
+}
+interface CapStyle {
+  fontFamily: string; fontWeight: number; fontSize: number;
   bold: boolean; italic: boolean; underline: boolean; uppercase: boolean;
   align: 'left' | 'center' | 'right';
-  posX: number; posY: number;
-  colorMode: 'solid' | 'gradient';
-  color: string; color2: string;
-  dropShadow: boolean; textStroke: boolean; background: boolean;
-  transition: string;
-  letterSpacing: number; lineHeight: number;
+  posX: number; posY: number; boxWidth: number;
+  colorMode: 'solid' | 'gradient'; color: string; color2: string;
+  letterSpacing: number; lineSpacing: number;
+  dropShadow: boolean; textStroke: boolean; background: boolean; glow: boolean;
+  bgColor: string;
+  transition: string; wordTransition: string;
+  speedMode: 'dynamic' | 'manual'; speed: number;
+  emphasisMode: 'emphasize' | 'spotlight';
+  emColorMode: 'solid' | 'gradient'; emColor: string; emColor2: string;
+  emSize: number; emFont: string; emWeight: number;
+  emBold: boolean; emItalic: boolean; emUnderline: boolean; emUppercase: boolean;
+  layout: 'splash' | 'center';
 }
 
-const DEFAULT_STYLE: CaptionStyle = {
-  fontFamily: "'Inter', sans-serif", fontWeight: 800, fontSize: 32,
-  bold: true, italic: false, underline: false, uppercase: false,
-  align: 'center', posX: 50, posY: 82,
+const DEFAULT_STYLE: CapStyle = {
+  fontFamily: "'Inter', sans-serif", fontWeight: 400, fontSize: 32,
+  bold: false, italic: false, underline: false, uppercase: false,
+  align: 'center', posX: 50, posY: 77.8, boxWidth: 92,
   colorMode: 'solid', color: '#FFFFFF', color2: '#4f8cff',
-  dropShadow: true, textStroke: false, background: true,
-  transition: 'fade', letterSpacing: 0, lineHeight: 1.35,
+  letterSpacing: 0, lineSpacing: 1.35,
+  dropShadow: false, textStroke: false, background: false, glow: false,
+  bgColor: 'rgba(0,0,0,0.72)',
+  transition: 'none', wordTransition: 'none',
+  speedMode: 'dynamic', speed: 70,
+  emphasisMode: 'emphasize',
+  emColorMode: 'solid', emColor: '#C8FF00', emColor2: '#38D2F5',
+  emSize: 8.8, emFont: "'Inter', sans-serif", emWeight: 900,
+  emBold: true, emItalic: false, emUnderline: false, emUppercase: false,
+  layout: 'center',
 };
 
-/* Devanagari / Indic scripts have no glyphs in Inter etc. — always append a
-   Noto fallback so Hindi/Marathi/Nepali render correctly (preview + export). */
-const SCRIPT_FALLBACK = "'Noto Sans Devanagari', 'Noto Sans', 'Noto Sans Tamil', 'Noto Sans Bengali', sans-serif";
-const withScript = (fam: string) => `${fam}, ${SCRIPT_FALLBACK}`;
+const SCRIPT_FB = "'Noto Sans Devanagari','Noto Sans','Noto Sans Tamil','Noto Sans Bengali',sans-serif";
+const withScript = (f: string) => `${f}, ${SCRIPT_FB}`;
 
 const FONTS = [
   { label: 'Inter', family: "'Inter', sans-serif" },
@@ -58,7 +72,7 @@ const FONTS = [
   { label: 'Playfair Display', family: "'Playfair Display', serif" },
   { label: 'Noto Sans Devanagari', family: "'Noto Sans Devanagari', sans-serif" },
 ];
-const GOOGLE_FONTS_HREF =
+const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Poppins:wght@400;600;700;800&family=Montserrat:wght@400;600;700;800&family=Roboto:wght@400;500;700&family=Oswald:wght@400;600;700&family=Bebas+Neue&family=Anton&family=Luckiest+Guy&family=Archivo+Black&family=Playfair+Display:wght@600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700;800;900&family=Noto+Sans:wght@400;600;700;800&display=swap';
 
 const WEIGHTS = [
@@ -66,85 +80,107 @@ const WEIGHTS = [
   { label: 'Semibold', value: 600 }, { label: 'Bold', value: 700 }, { label: 'Black', value: 900 },
 ];
 
-const TEMPLATES: { name: string; tag: string; patch: Partial<CaptionStyle> }[] = [
-  { name: 'Kalakar Glow', tag: 'Bold · Shadow', patch: { fontFamily: "'Luckiest Guy', cursive", color: '#b6ff3a', uppercase: true, dropShadow: true, background: false, fontWeight: 400 } },
-  { name: 'Ali Abdaal', tag: 'Clean', patch: { fontFamily: "'Inter', sans-serif", color: '#0b1220', background: true, uppercase: false, dropShadow: false, fontWeight: 800 } },
-  { name: 'Bold Title', tag: 'Impact', patch: { fontFamily: "'Anton', sans-serif", color: '#ffffff', uppercase: true, textStroke: true, background: false, fontWeight: 400 } },
-  { name: 'Emphasis', tag: 'Accent', patch: { fontFamily: "'Poppins', sans-serif", colorMode: 'gradient', color: '#4f8cff', color2: '#38D2F5', uppercase: true, fontWeight: 800 } },
-  { name: 'Lower Third', tag: 'Subtle', patch: { fontFamily: "'Montserrat', sans-serif", color: '#ffffff', background: true, align: 'left', posX: 22, posY: 88, uppercase: false, fontWeight: 700 } },
-  { name: 'Highlight', tag: 'Pop', patch: { fontFamily: "'Bebas Neue', sans-serif", color: '#ffffff', background: true, uppercase: true, fontWeight: 400, fontSize: 40 } },
+interface Tpl { name: string; premium?: boolean; patch: Partial<CapStyle>; }
+const TEMPLATES: Tpl[] = [
+  { name: 'Kalakar', patch: { fontFamily: "'Inter', sans-serif", fontWeight: 900, color: '#FFFFFF', emColor: '#C8FF00', uppercase: true, layout: 'splash', background: false, dropShadow: true } },
+  { name: 'Ali Abdaal', premium: true, patch: { fontFamily: "'Inter', sans-serif", fontWeight: 800, color: '#111827', emColor: '#9CA3AF', background: true, bgColor: '#FFFFFF', uppercase: false, dropShadow: false, layout: 'center' } },
+  { name: 'Clean Motion', patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 700, color: '#FFFFFF', emColor: '#4f8cff', background: false, dropShadow: true, uppercase: false } },
+  { name: 'Mota', premium: true, patch: { fontFamily: "'Archivo Black', sans-serif", fontWeight: 400, color: '#FFFFFF', emColor: '#22c55e', uppercase: true, dropShadow: true, background: false } },
+  { name: 'Tabahi', premium: true, patch: { fontFamily: "'Anton', sans-serif", fontWeight: 400, color: '#FFFFFF', italic: true, uppercase: true, textStroke: true, dropShadow: true, background: false } },
+  { name: 'Deep Glow', premium: true, patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 800, color: '#ff3df0', emColor: '#ffffff', uppercase: true, glow: true, background: false } },
+  { name: 'Seedha Saadha', premium: true, patch: { fontFamily: "'Inter', sans-serif", fontWeight: 900, color: '#FFFFFF', emColor: '#C8FF00', background: true, bgColor: 'rgba(0,0,0,0.92)', uppercase: true } },
+  { name: 'Neon Pop', patch: { fontFamily: "'Bebas Neue', sans-serif", fontWeight: 400, fontSize: 40, color: '#38f5c8', emColor: '#ffffff', uppercase: true, glow: true, background: false } },
+  { name: 'Lower Third', patch: { fontFamily: "'Montserrat', sans-serif", fontWeight: 700, color: '#FFFFFF', background: true, bgColor: 'rgba(0,0,0,0.72)', align: 'left', posX: 22, posY: 88, uppercase: false } },
+  { name: 'Sunset', patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 800, colorMode: 'gradient', color: '#ff8a3d', color2: '#ff3d77', uppercase: true, background: false, dropShadow: true } },
 ];
 
 const TRANSITIONS = [
   { id: 'none', name: 'None' }, { id: 'fade', name: 'Fade' }, { id: 'pop', name: 'Pop' },
-  { id: 'zoom', name: 'Zoom' }, { id: 'scale', name: 'Scale' }, { id: 'slide', name: 'Slide L/R' },
-  { id: 'slideup', name: 'Slide Up/Down' },
+  { id: 'zoom', name: 'Zoom' }, { id: 'scale', name: 'Scale' },
+  { id: 'slide', name: 'Slide Left / Right' }, { id: 'slideup', name: 'Slide Up / Down' },
 ];
-const ANIM_CLASS: Record<string, string> = {
+const ANIM: Record<string, string> = {
   none: '', fade: 'cap-fade', pop: 'cap-pop', zoom: 'cap-zoom',
   scale: 'cap-scale', slide: 'cap-slide', slideup: 'cap-slideup',
 };
 
+/* ══════════════════════ helpers ══════════════════════ */
+
 const pad = (n: number, w = 2) => String(Math.floor(n)).padStart(w, '0');
 const srtTime = (t: number) => `${pad(t / 3600)}:${pad((t % 3600) / 60)}:${pad(t % 60)},${pad((t - Math.floor(t)) * 1000, 3)}`;
-const tc = (t: number) => `${pad(t / 60)}:${pad(t % 60)}:${pad((t % 1) * 100)}`;
-const clock = (t: number) => `${Math.floor(t / 60)}:${pad(t % 60)}`;
+const tc = (t: number) => `${pad(t / 3600)}:${pad((t % 3600) / 60)}:${pad(t % 60)}:${pad((t % 1) * 100)}`;
+const clockLbl = (t: number) => `${pad(t / 60)}:${pad(t % 60)}.000`;
 const buildSrt = (s: Seg[]) => s.map((x, i) => `${i + 1}\n${srtTime(x.start)} --> ${srtTime(x.end)}\n${x.text}\n`).join('\n');
 
+const EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{2B00}-\u{2BFF}\uFE0F]/gu;
+
+interface WordTok { text: string; start: number; end: number; wi: number; segIdx: number; key: string; }
+
+function segWords(seg: Seg, segIdx: number): WordTok[] {
+  const parts = seg.text.split(/\s+/).filter(Boolean);
+  const total = parts.reduce((a, w) => a + w.length, 0) || 1;
+  const dur = Math.max(0.12, seg.end - seg.start);
+  let t = seg.start;
+  return parts.map((w, wi) => {
+    const slice = (w.length / total) * dur;
+    const tok: WordTok = { text: w, start: t, end: t + slice, wi, segIdx, key: `${seg.id}:${wi}` };
+    t += slice;
+    return tok;
+  });
+}
+
 function waveHeights(count: number): number[] {
-  const out: number[] = [];
-  let seed = 1337;
+  const out: number[] = []; let seed = 1337;
   for (let i = 0; i < count; i++) {
-    seed = (seed * 9301 + 49297) % 233280;
-    const r = seed / 233280;
+    seed = (seed * 9301 + 49297) % 233280; const r = seed / 233280;
     const env = 0.35 + 0.65 * Math.abs(Math.sin(i / 7) * Math.cos(i / 23));
     out.push(0.12 + r * 0.55 * env);
   }
   return out;
 }
-
-function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let line = '';
-  for (const w of words) {
-    const test = line ? `${line} ${w}` : w;
-    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w; }
-    else line = test;
-  }
-  if (line) lines.push(line);
-  return lines.length ? lines : [text];
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean); const lines: string[] = []; let line = '';
+  for (const w of words) { const t = line ? `${line} ${w}` : w; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; }
+  if (line) lines.push(line); return lines.length ? lines : [text];
+}
+function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+function splitSeg(s: Seg, maxChars: number, lines: number): Seg[] {
+  const cap = Math.max(6, maxChars * lines); const text = s.text.trim();
+  if (text.length <= cap) return [s];
+  const words = text.split(/\s+/); const chunks: string[] = []; let line = '';
+  for (const w of words) { const t = line ? `${line} ${w}` : w; if (t.length > cap && line) { chunks.push(line); line = w; } else line = t; }
+  if (line) chunks.push(line);
+  const dur = Math.max(0.2, s.end - s.start); const total = chunks.reduce((a, c) => a + c.length, 0) || 1;
+  let t = s.start;
+  return chunks.map((c, i) => { const sl = (c.length / total) * dur; const seg: Seg = { id: s.id * 1000 + i, start: t, end: Math.min(s.end, t + sl), text: c, style: s.style }; t += sl; return seg; });
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-/* ───────────────────────────── component ─────────────────────────────── */
+/* ══════════════════════ component ══════════════════════ */
 
 export default function EditorPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const timelineRef = useRef<HTMLDivElement>(null);
+  const tlRef = useRef<HTMLDivElement>(null);
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const audioSrcRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const audioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  // audio graph
+  const acRef = useRef<AudioContext | null>(null);
+  const srcRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const destRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const chainRef = useRef<AudioNode[]>([]);
 
   const [project, setProject] = useState<Project | null>(null);
   const [segments, setSegments] = useState<Seg[]>([]);
+  const [wordStyles, setWordStyles] = useState<Record<string, Partial<CapStyle>>>({});
   const [title, setTitle] = useState('');
-  const [style, setStyle] = useState<CaptionStyle>(DEFAULT_STYLE);
+  const [style, setStyle] = useState<CapStyle>(DEFAULT_STYLE);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -154,50 +190,90 @@ export default function EditorPage() {
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [activeIdx, setActiveIdx] = useState(-1);
-  const [selectedIdx, setSelectedIdx] = useState(-1);
-  const [videoDownloading, setVideoDownloading] = useState(false);
-  const [exportPct, setExportPct] = useState(0);
 
   const [tab, setTab] = useState<'text' | 'templates' | 'transitions' | 'audio'>('text');
-  const [tlMode, setTlMode] = useState<'word' | 'line'>('line');
+  const [tlMode, setTlMode] = useState<'word' | 'line'>('word');
+  const [trMode, setTrMode] = useState<'line' | 'word'>('line');
   const [pxPerSec, setPxPerSec] = useState(26);
   const [search, setSearch] = useState('');
-  const [mobilePanel, setMobilePanel] = useState<'none' | 'captions' | 'inspector'>('none');
+  const [bump, setBump] = useState(0);
 
-  const [dbTemplates, setDbTemplates] = useState<any[]>([]);
-  const [dbTransitions, setDbTransitions] = useState<any[]>([]);
+  const [selLine, setSelLine] = useState(-1);
+  const [selWords, setSelWords] = useState<Set<string>>(new Set());
+
+  /* explicit editing scope — defaults to ALL. Selecting words switches to word
+     scope (that's an explicit act); clicking captions to navigate does NOT
+     hijack the scope — "This Line" is chosen only via its pill. */
+  const [txtScope, setTxtScope] = useState<'all' | 'line' | 'word'>('all');
+  const [trScope, setTrScope] = useState<'all' | 'line'>('all');
+  useEffect(() => {
+    if (selWords.size > 0) setTxtScope('word');
+    else setTxtScope((s) => (s === 'word' ? 'all' : s));
+  }, [selWords]);
+  useEffect(() => {
+    if (selLine < 0) { setTxtScope((s) => (s === 'line' ? 'all' : s)); setTrScope((s) => (s === 'line' ? 'all' : s)); }
+  }, [selLine]);
+
+  const [showTools, setShowTools] = useState(false);
+  const [maxChars, setMaxChars] = useState(24);
+  const [lineCount, setLineCount] = useState(1);
+  const [delay, setDelay] = useState(0);
+
+  const [lineStylingFor, setLineStylingFor] = useState<number | null>(null);
+  const [tplTab, setTplTab] = useState<'builtin' | 'presets'>('builtin');
+  const [tplSearch, setTplSearch] = useState('');
+  const [appliedTpl, setAppliedTpl] = useState<string | null>(null);
+  const [presets, setPresets] = useState<{ name: string; patch: Partial<CapStyle> }[]>([]);
+
+  const [exportOpen, setExportOpen] = useState(false);
+  const [expType, setExpType] = useState<'video' | 'srt' | 'txt'>('video');
+  const [expRes, setExpRes] = useState<'720' | '1080'>('720');
+  const [rendering, setRendering] = useState(false);
+  const [pct, setPct] = useState(0);
+
+  const [cleanOn, setCleanOn] = useState(false);
+  const [romanOn, setRomanOn] = useState(false);
+  const [romanMap, setRomanMap] = useState<Record<number, string>>({});
+  const [romanizing, setRomanizing] = useState(false);
+
+  const [mobilePanel, setMobilePanel] = useState<'none' | 'captions' | 'inspector'>('none');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const markDirty = () => setDirty(true);
-  const patchStyle = (p: Partial<CaptionStyle>) => { setStyle((s) => ({ ...s, ...p })); markDirty(); };
+  const isFree = (user?.plan || 'free') === 'free';
 
+  /* fonts */
   useEffect(() => {
-    if (document.querySelector('link[data-editor-fonts]')) return;
-    const l = document.createElement('link');
-    l.rel = 'stylesheet'; l.href = GOOGLE_FONTS_HREF; l.dataset.editorFonts = '1';
+    if (document.querySelector('link[data-ed-fonts]')) return;
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = FONTS_HREF; l.dataset.edFonts = '1';
     document.head.appendChild(l);
   }, []);
 
+  /* presets from localStorage */
   useEffect(() => {
-    (async () => {
-      try {
-        const [t, tr] = await Promise.all([
-          authFetch('/api/admin/content?type=templates'),
-          authFetch('/api/admin/content?type=transitions'),
-        ]);
-        if (t.ok) setDbTemplates((await t.json()).items || []);
-        if (tr.ok) setDbTransitions((await tr.json()).items || []);
-      } catch { /* non-fatal */ }
-    })();
+    try { const raw = localStorage.getItem('captionist:presets'); if (raw) setPresets(JSON.parse(raw)); } catch {}
   }, []);
+  const savePreset = () => {
+    const name = prompt('Preset name?'); if (!name) return;
+    const next = [...presets, { name, patch: { ...style } }];
+    setPresets(next);
+    try { localStorage.setItem('captionist:presets', JSON.stringify(next)); } catch {}
+    toast.success('Preset saved');
+  };
 
+  /* load */
   useEffect(() => {
     (async () => {
       const res = await authFetch(`/api/projects/${id}`);
       if (res.ok) {
         const { project: p } = await res.json();
         setProject(p); setTitle(p.title);
-        setSegments((p.transcript?.segments || []) as Seg[]);
+        const raw: Seg[] = (p.transcript?.segments || []).map((s: any, i: number) => ({ id: s.id ?? i, start: s.start, end: s.end, text: s.text, style: s.style }));
+        // Kalakar-style: one short line at a time — auto-split any long segments
+        const needsSplit = raw.some((s) => s.text.trim().length > 34);
+        setSegments(needsSplit ? raw.flatMap((s) => splitSeg(s, 32, 1)) : raw);
         if (p.style) setStyle({ ...DEFAULT_STYLE, ...p.style });
+        if (p.wordStyles) setWordStyles(p.wordStyles);
         setDuration(p.durationSeconds || 0);
       } else { toast.error('Could not load project'); router.replace('/dashboard/projects'); }
       setLoading(false);
@@ -205,6 +281,48 @@ export default function EditorPage() {
   }, [id, router]);
 
   const totalDur = useMemo(() => duration || segments[segments.length - 1]?.end || 1, [duration, segments]);
+  const allWords = useMemo(() => segments.flatMap((s, i) => segWords(s, i)), [segments]);
+
+  /* stage size → font scale identical to export renderer (H/720 * 1.5) */
+  const [stageH, setStageH] = useState(0);
+  useEffect(() => {
+    const el = stageRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setStageH(el.clientHeight));
+    ro.observe(el); setStageH(el.clientHeight);
+    return () => ro.disconnect();
+  }, [loading]);
+  const fontK = ((stageH || 380) / 720) * 1.5;
+
+  /* fit the video stage inside the available area so controls never get pushed off-screen */
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [wrapBox, setWrapBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = wrapRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setWrapBox({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el); setWrapBox({ w: el.clientWidth, h: el.clientHeight });
+    return () => ro.disconnect();
+  }, [loading]);
+  const [vRatio, setVRatio] = useState(16 / 9);
+
+  /* timeline zoom: Ctrl/⌘ + wheel (trackpad pinch) and two-finger touch pinch */
+  useEffect(() => {
+    const el = tlRef.current; if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setPxPerSec((z) => Math.min(220, Math.max(4, Math.round(z * (e.deltaY < 0 ? 1.12 : 0.89)))));
+    };
+    let pinch: { d: number; z: number } | null = null;
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const ts = (e: TouchEvent) => { if (e.touches.length === 2) pinch = { d: dist(e.touches), z: pxPerSec }; };
+    const tm = (e: TouchEvent) => { if (pinch && e.touches.length === 2) { e.preventDefault(); const k = dist(e.touches) / pinch.d; setPxPerSec(Math.min(220, Math.max(4, Math.round(pinch.z * k)))); } };
+    const te = () => { pinch = null; };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('touchstart', ts, { passive: true });
+    el.addEventListener('touchmove', tm, { passive: false });
+    el.addEventListener('touchend', te);
+    return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchstart', ts); el.removeEventListener('touchmove', tm); el.removeEventListener('touchend', te); };
+  }, [loading, pxPerSec]);
 
   const onTime = useCallback(() => {
     const t = videoRef.current?.currentTime ?? 0;
@@ -214,254 +332,574 @@ export default function EditorPage() {
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onMeta = () => { if (v.duration && isFinite(v.duration)) setDuration(v.duration); };
-    v.addEventListener('play', onPlay); v.addEventListener('pause', onPause); v.addEventListener('loadedmetadata', onMeta);
-    return () => { v.removeEventListener('play', onPlay); v.removeEventListener('pause', onPause); v.removeEventListener('loadedmetadata', onMeta); };
+    const p = () => setPlaying(true), q = () => setPlaying(false);
+    const m = () => { if (v.duration && isFinite(v.duration)) setDuration(v.duration); if (v.videoWidth && v.videoHeight) setVRatio(v.videoWidth / v.videoHeight); };
+    v.addEventListener('play', p); v.addEventListener('pause', q); v.addEventListener('loadedmetadata', m);
+    return () => { v.removeEventListener('play', p); v.removeEventListener('pause', q); v.removeEventListener('loadedmetadata', m); };
   }, [project?.videoUrl]);
 
   useEffect(() => {
-    const el = timelineRef.current; if (!el) return;
+    const el = tlRef.current; if (!el) return;
     const x = current * pxPerSec;
     if (x < el.scrollLeft + 60 || x > el.scrollLeft + el.clientWidth - 120) el.scrollLeft = Math.max(0, x - el.clientWidth / 2);
   }, [current, pxPerSec]);
 
-  const togglePlay = () => { const v = videoRef.current; if (!v) return; if (v.paused) v.play().catch(() => {}); else v.pause(); };
+  const togglePlay = () => { const v = videoRef.current; if (!v) return; ensureAudio(); if (v.paused) v.play().catch(() => {}); else v.pause(); };
   const seekTo = (t: number) => { const v = videoRef.current; if (!v) return; v.currentTime = t; setCurrent(t); };
   const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !v.muted; setMuted(v.muted); };
-  const goFullscreen = () => stageRef.current?.requestFullscreen?.().catch(() => {});
+  const fs = () => stageRef.current?.requestFullscreen?.().catch(() => {});
 
+  /* ── audio graph (real enhancement + A/B) ── */
+  const ensureAudio = () => {
+    const v = videoRef.current; if (!v || acRef.current) return;
+    try {
+      const Ctx = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext;
+      const ac = new Ctx();
+      const src = ac.createMediaElementSource(v);
+      const dest = ac.createMediaStreamDestination();
+      const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 85;
+      const presence = ac.createBiquadFilter(); presence.type = 'peaking'; presence.frequency.value = 3000; presence.gain.value = 3.5; presence.Q.value = 1;
+      const comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -26; comp.knee.value = 28; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.25;
+      const gain = ac.createGain(); gain.gain.value = 1.35;
+      acRef.current = ac; srcRef.current = src; destRef.current = dest; chainRef.current = [hp, presence, comp, gain];
+      route(false);
+    } catch (e) { console.warn('[audio] unavailable', e); }
+  };
+  const route = (clean: boolean) => {
+    const ac = acRef.current, src = srcRef.current, dest = destRef.current; if (!ac || !src || !dest) return;
+    try { src.disconnect(); chainRef.current.forEach((n) => n.disconnect()); } catch {}
+    if (clean) {
+      const [hp, pr, comp, gain] = chainRef.current as any[];
+      src.connect(hp); hp.connect(pr); pr.connect(comp); comp.connect(gain);
+      gain.connect(ac.destination); gain.connect(dest);
+    } else { src.connect(ac.destination); src.connect(dest); }
+    ac.resume().catch(() => {});
+  };
+  const toggleClean = () => {
+    ensureAudio();
+    const next = !cleanOn; setCleanOn(next); route(next);
+    toast.success(next ? 'AI enhancement active' : 'Original audio');
+  };
+
+  /* ── edits ── */
   const updateText = (i: number, text: string) => { setSegments((p) => p.map((s, x) => (x === i ? { ...s, text } : s))); markDirty(); };
   const removeSeg = (i: number) => { setSegments((p) => p.filter((_, x) => x !== i)); markDirty(); };
-  const addLineAtPlayhead = () => {
-    const seg: Seg = { id: Date.now(), start: current, end: Math.min(totalDur, current + 2), text: 'New caption' };
-    setSegments((p) => [...p, seg].sort((a, b) => a.start - b.start)); markDirty();
+  const addLine = () => { const s: Seg = { id: Date.now(), start: current, end: Math.min(totalDur, current + 2), text: 'New caption' }; setSegments((p) => [...p, s].sort((a, b) => a.start - b.start)); markDirty(); };
+
+  const patchGlobal = (p: Partial<CapStyle>) => { setStyle((s) => ({ ...s, ...p })); markDirty(); };
+  const patchLine = (i: number, p: Partial<CapStyle>) => { setSegments((prev) => prev.map((s, x) => (x === i ? { ...s, style: { ...(s.style || {}), ...p } } : s))); markDirty(); };
+  const patchWords = (p: Partial<CapStyle>) => {
+    if (selWords.size === 0) return;
+    setWordStyles((prev) => { const n = { ...prev }; selWords.forEach((k) => { n[k] = { ...(n[k] || {}), ...p }; }); return n; });
+    markDirty();
   };
+  /** scope-aware patch. 'all' also clears the same keys from per-line and
+      per-word overrides so a global change really applies everywhere. */
+  const patchTarget = (p: Partial<CapStyle>) => {
+    if (txtScope === 'word' && selWords.size > 0) { patchWords(p); return; }
+    if (txtScope === 'line' && selLine >= 0) { patchLine(selLine, p); return; }
+    patchGlobal(p);
+    const keys = Object.keys(p) as (keyof CapStyle)[];
+    setSegments((prev) => prev.map((s) => {
+      if (!s.style) return s;
+      const st: any = { ...s.style }; keys.forEach((k) => delete st[k]);
+      return { ...s, style: st };
+    }));
+    setWordStyles((prev) => {
+      const n: typeof prev = {};
+      for (const [k, v] of Object.entries(prev)) { const c: any = { ...v }; keys.forEach((kk) => delete c[kk]); n[k] = c; }
+      return n;
+    });
+  };
+
+  const effLine = (i: number): CapStyle => ({ ...style, ...(segments[i]?.style || {}) });
+  const effWord = (i: number, key: string): CapStyle => ({ ...effLine(i), ...(wordStyles[key] || {}) });
+
+  /* current target style shown in the Text tab */
+  const targetStyle: CapStyle = useMemo(() => {
+    if (txtScope === 'word' && selWords.size > 0) { const k = Array.from(selWords)[0]; const si = segments.findIndex((s) => k.startsWith(`${s.id}:`)); return effWord(Math.max(0, si), k); }
+    if (txtScope === 'line' && selLine >= 0) return effLine(selLine);
+    return style;
+  }, [txtScope, selWords, selLine, segments, wordStyles, style]);
+
+  /* ── caption tools ── */
+  const applySplit = () => { setSegments((p) => p.flatMap((s) => splitSeg(s, maxChars, lineCount))); markDirty(); toast.success('Captions re-split'); };
+  const rmPunct = () => { setSegments((p) => p.map((s) => ({ ...s, text: s.text.replace(/[.,!?;:"“”‘’—–]/g, '').replace(/\s+/g, ' ').trim() }))); markDirty(); toast.success('Punctuation removed'); };
+  const rmEmph = () => { setWordStyles({}); markDirty(); toast.success('Emphasis removed'); };
+  const rmEmoji = () => { setSegments((p) => p.map((s) => ({ ...s, text: s.text.replace(EMOJI_RE, '').replace(/\s+/g, ' ').trim() })).filter((s) => s.text)); markDirty(); toast.success('Emojis removed'); };
+  const rmGaps = () => { setSegments((p) => { const s = [...p].sort((a, b) => a.start - b.start); for (let i = 1; i < s.length; i++) s[i] = { ...s[i], start: s[i - 1].end }; return s; }); markDirty(); toast.success('Gaps removed'); };
+  const setDelayV = (v: number) => { const d = v - delay; setDelay(v); setSegments((p) => p.map((s) => ({ ...s, start: Math.max(0, s.start + d), end: Math.max(0.1, s.end + d) }))); markDirty(); };
+
+  /* ── romanize ── */
+  const toggleRoman = async () => {
+    if (romanOn) { setRomanOn(false); return; }
+    if (Object.keys(romanMap).length) { setRomanOn(true); return; }
+    setRomanizing(true);
+    try {
+      const res = await authFetch('/api/romanize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: segments.map((s) => s.text) }) });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed');
+      const map: Record<number, string> = {}; segments.forEach((s, i) => (map[s.id] = d.roman[i] ?? s.text));
+      setRomanMap(map); setRomanOn(true); toast.success('Roman script ready');
+    } catch (e: any) { toast.error(e?.message || 'Romanize failed'); }
+    finally { setRomanizing(false); }
+  };
+  const shown = (s: Seg) => (romanOn && romanMap[s.id] ? romanMap[s.id] : s.text);
 
   const save = async () => {
     setSaving(true);
     const text = segments.map((s) => s.text).join(' ');
-    const res = await authFetch(`/api/projects/${id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, transcript: { text, segments }, style }),
-    });
+    const res = await authFetch(`/api/projects/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, transcript: { text, segments }, style, wordStyles }) });
     setSaving(false);
     if (res.ok) { setDirty(false); toast.success('Saved'); } else toast.error('Save failed');
   };
-
-  const download = (data: string, name: string) => {
-    const url = URL.createObjectURL(new Blob([data], { type: 'text/plain;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
-  };
+  const dl = (data: string, name: string) => { const u = URL.createObjectURL(new Blob([data], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = u; a.download = name; a.click(); URL.revokeObjectURL(u); };
   const safeName = (title || 'captions').replace(/[^\w-]+/g, '_');
-  const cleanAudio = () => toast.success('Audio enhancement is applied at export time.');
 
-  /* ── canvas caption renderer: multi-line, wrapped, script-safe, never clips ── */
-  const drawExportFrame = (ctx: CanvasRenderingContext2D, W: number, H: number, time: number) => {
+  const animDur = (st: CapStyle, seg?: Seg) => {
+    if (st.speedMode === 'manual') return Math.max(0.15, 1.1 - (st.speed / 100) * 0.9);
+    const d = seg ? Math.max(0.25, seg.end - seg.start) : 0.8;
+    return Math.min(0.8, Math.max(0.32, d * 0.4));
+  };
+
+  /* ── canvas renderer (burns per-word styles + emphasis) ── */
+  const drawFrame = (ctx: CanvasRenderingContext2D, W: number, H: number, t: number) => {
     const v = videoRef.current;
-    if (v && v.readyState >= 2) ctx.drawImage(v, 0, 0, W, H);
-    else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
+    if (v && v.readyState >= 2) ctx.drawImage(v, 0, 0, W, H); else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
+    const si = segments.findIndex((s) => t >= s.start && t <= s.end);
+    if (si < 0) return;
+    const seg = segments[si]; const st = effLine(si);
+    const scale = H / 720; const baseFs = st.fontSize * scale * 1.5;
 
-    const active = segments.find((s) => time >= s.start && time <= s.end);
-    let text = active?.text || '';
-    if (!text) return;
-    if (style.uppercase) text = text.toUpperCase();
+    /* Build per-word tokens with the SAME style resolution as the live overlay:
+       base styles apply to all words; emphasis adds color/size/font on top. */
+    interface Tok { text: string; fs: number; font: string; color: string; grad?: [string, string]; underline: boolean; w: number; tw: number; spot?: string; }
+    const words = segWords({ ...seg, text: shown(seg) }, si);
+    if (words.length === 0) return;
+    const toks: Tok[] = words.map((wd) => {
+      const ws: any = wordStyles[wd.key] || {};
+      const em = !!ws.emphasized;
+      const sw = { ...st, ...ws } as CapStyle;
+      const upper = sw.uppercase || (em && sw.emUppercase);
+      const italic = sw.italic || (em && sw.emItalic);
+      const underline = sw.underline || (em && sw.emUnderline);
+      const baseW = sw.bold ? Math.max(sw.fontWeight, 700) : sw.fontWeight;
+      const weight = em ? Math.max(sw.emBold ? Math.max(sw.emWeight, 700) : sw.emWeight, sw.bold ? 700 : 0) : baseW;
+      const fs = (em ? sw.fontSize * (sw.emSize / 8) : sw.fontSize) * scale * 1.5;
+      const font = `${italic ? 'italic ' : ''}${weight} ${fs}px ${withScript(em ? sw.emFont : sw.fontFamily)}`;
+      const useGrad = em ? sw.emColorMode === 'gradient' : sw.colorMode === 'gradient';
+      const c1 = em ? sw.emColor : sw.color, c2 = em ? sw.emColor2 : sw.color2;
+      ctx.font = font;
+      const text = upper ? wd.text.toUpperCase() : wd.text;
+      const tw = ctx.measureText(text).width;
+      const w = tw + ctx.measureText(' ').width;
+      return { text, fs, font, color: c1, grad: useGrad ? [c1, c2] as [string, string] : undefined, underline, w, tw, spot: em && sw.emphasisMode === 'spotlight' ? c1 : undefined };
+    });
 
-    const scale = H / 720;
-    const fs = style.fontSize * scale * 1.5;
-    const weight = style.bold ? Math.max(style.fontWeight, 700) : style.fontWeight;
-    ctx.font = `${style.italic ? 'italic ' : ''}${weight} ${fs}px ${withScript(style.fontFamily)}`;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = style.align;
+    /* wrap tokens into rows */
+    const maxW = W * ((st.boxWidth ?? 92) / 100);
+    const rows: Tok[][] = []; let row: Tok[] = []; let rw = 0;
+    for (const tok of toks) { if (rw + tok.w > maxW && row.length) { rows.push(row); row = [tok]; rw = tok.w; } else { row.push(tok); rw += tok.w; } }
+    if (row.length) rows.push(row);
 
-    const maxW = W * 0.9;
-    const lines = wrapLines(ctx, text, maxW);
-    const lh = fs * Math.max(style.lineHeight, 1.4);   // headroom for Devanagari matras
-    const blockH = lines.length * lh;
+    const lh = baseFs * Math.max(st.lineSpacing, 1.35);
+    const blockH = rows.length * lh;
+    const cx = W * (st.posX / 100);
+    let cy = H * (st.posY / 100);
+    cy = Math.min(H - blockH / 2 - 12 * scale, Math.max(blockH / 2 + 12 * scale, cy));
 
-    const cx = W * (style.posX / 100);
-    let cy = H * (style.posY / 100);
-    cy = Math.min(H - blockH / 2 - 12 * scale, Math.max(blockH / 2 + 12 * scale, cy)); // clamp on-screen
+    const noShadow = () => { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0; };
+    const applyShadow = (glowColor: string) => {
+      if (st.glow) { ctx.shadowColor = glowColor; ctx.shadowBlur = 26 * scale; ctx.shadowOffsetY = 0; }
+      else if (st.dropShadow) { ctx.shadowColor = 'rgba(0,0,0,.85)'; ctx.shadowBlur = 18 * scale; ctx.shadowOffsetY = 4 * scale; }
+      else noShadow();
+    };
 
-    if (style.background && style.colorMode !== 'gradient') {
-      const padX = fs * 0.4, padY = fs * 0.3;
-      const widest = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width)));
-      const bw = widest + padX * 2, bh = blockH + padY * 2;
-      const bx = style.align === 'left' ? cx - padX : style.align === 'right' ? cx - bw + padX : cx - bw / 2;
-      ctx.fillStyle = 'rgba(0,0,0,0.72)';
-      roundRect(ctx, bx, cy - bh / 2, bw, bh, fs * 0.25); ctx.fill();
+    if (st.background) {
+      const px = baseFs * 0.4, py = baseFs * 0.3;
+      const widest = Math.min(maxW, Math.max(...rows.map((r) => r.reduce((a, x) => a + x.w, 0))));
+      const bw = widest + px * 2, bh = blockH + py * 2;
+      const bx = st.align === 'left' ? cx - maxW / 2 - px : st.align === 'right' ? cx + maxW / 2 - bw + px : cx - bw / 2;
+      noShadow(); ctx.fillStyle = st.bgColor || 'rgba(0,0,0,0.72)';
+      roundRect(ctx, bx, cy - bh / 2, bw, bh, baseFs * 0.25); ctx.fill();
     }
 
-    if (style.dropShadow) { ctx.shadowColor = 'rgba(0,0,0,.85)'; ctx.shadowBlur = 18 * scale; ctx.shadowOffsetY = 4 * scale; }
-    else { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0; }
-
-    if (style.colorMode === 'gradient') {
-      const g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(0, style.color); g.addColorStop(1, style.color2); ctx.fillStyle = g;
-    } else ctx.fillStyle = style.color;
-
-    const startY = cy - blockH / 2 + lh / 2;
-    lines.forEach((ln, i) => {
-      const y = startY + i * lh;
-      if (style.textStroke) { ctx.lineWidth = Math.max(2, fs * 0.06); ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.lineJoin = 'round'; ctx.strokeText(ln, cx, y); }
-      ctx.fillText(ln, cx, y);
-    });
-    ctx.shadowColor = 'transparent';
-  };
-
-  const ensureAudioTracks = (video: HTMLVideoElement): MediaStreamTrack[] => {
-    try {
-      if (!audioCtxRef.current) {
-        const Ctx = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext;
-        const ctx = new Ctx();
-        const src = ctx.createMediaElementSource(video);
-        const dest = ctx.createMediaStreamDestination();
-        src.connect(dest); src.connect(ctx.destination);
-        audioCtxRef.current = ctx; audioSrcRef.current = src; audioDestRef.current = dest;
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    rows.forEach((r, ri) => {
+      const totalW = r.reduce((a, x) => a + x.w, 0);
+      let x = st.align === 'left' ? cx - maxW / 2 : st.align === 'right' ? cx + maxW / 2 - totalW : cx - totalW / 2;
+      const y = cy - blockH / 2 + lh / 2 + ri * lh;
+      for (const tok of r) {
+        ctx.font = tok.font;
+        if (tok.spot) {
+          noShadow(); ctx.fillStyle = tok.spot;
+          roundRect(ctx, x - tok.fs * 0.08, y - tok.fs * 0.58, tok.tw + tok.fs * 0.16, tok.fs * 1.16, tok.fs * 0.15); ctx.fill();
+          ctx.fillStyle = '#000';
+        } else if (tok.grad) {
+          const g = ctx.createLinearGradient(x, 0, x + tok.tw, 0); g.addColorStop(0, tok.grad[0]); g.addColorStop(1, tok.grad[1]);
+          applyShadow(tok.grad[0]); ctx.fillStyle = g;
+        } else { applyShadow(tok.color); ctx.fillStyle = tok.color; }
+        if (st.textStroke && !tok.spot) { ctx.lineWidth = Math.max(2, tok.fs * 0.06); ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.lineJoin = 'round'; ctx.strokeText(tok.text, x, y); }
+        ctx.fillText(tok.text, x, y);
+        if (tok.underline) {
+          noShadow();
+          ctx.strokeStyle = tok.spot ? '#000' : (tok.grad ? tok.grad[0] : tok.color);
+          ctx.lineWidth = Math.max(1.5, tok.fs * 0.06);
+          ctx.beginPath(); ctx.moveTo(x, y + tok.fs * 0.44); ctx.lineTo(x + tok.tw, y + tok.fs * 0.44); ctx.stroke();
+        }
+        x += tok.w;
       }
-      audioCtxRef.current.resume().catch(() => {});
-      return audioDestRef.current!.stream.getAudioTracks();
-    } catch (e) { console.warn('[export] audio unavailable:', e); return []; }
+    });
+    noShadow();
   };
 
-  const downloadVideo = async () => {
+  const render = async () => {
+    if (expType === 'srt') { dl(buildSrt(segments), `${safeName}.srt`); toast.success('SRT downloaded'); return; }
+    if (expType === 'txt') { dl(segments.map((s) => shown(s)).join('\n'), `${safeName}.txt`); toast.success('TXT downloaded'); return; }
+
+    const tpl = TEMPLATES.find((x) => x.name === appliedTpl);
+    if (isFree && tpl?.premium) { toast.error('Premium template — switch to a free template or upgrade.'); return; }
+    if (isFree && expRes === '1080') { toast.error('1080P is a premium resolution. Choose 720P or upgrade.'); return; }
+
     const video = videoRef.current, canvas = canvasRef.current;
     if (!project?.videoUrl || !video || !canvas) { toast.error('Video not ready'); return; }
-
-    const W = video.videoWidth || 1280;
-    const H = video.videoHeight || Math.round(W * 9 / 16);
+    const H = expRes === '1080' ? 1080 : 720;
+    const ratio = (video.videoWidth || 1280) / (video.videoHeight || 720);
+    const W = Math.round(H * ratio);
     canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) { toast.error('Canvas unavailable'); return; }
+    const ctx = canvas.getContext('2d'); if (!ctx) return;
+    try { ctx.drawImage(video, 0, 0, W, H); canvas.toDataURL(); } catch { toast.error('Enable Storage CORS, then hard-reload.'); return; }
 
-    try { ctx.drawImage(video, 0, 0, W, H); canvas.toDataURL(); }
-    catch { toast.error('Cannot export: enable CORS on your Storage bucket, then hard-reload.'); return; }
+    ensureAudio();
+    const cs = canvas.captureStream?.(30); if (!cs) { toast.error('Canvas capture unsupported'); return; }
+    const aTracks = destRef.current ? destRef.current.stream.getAudioTracks() : [];
+    const out = new MediaStream([...cs.getVideoTracks(), ...aTracks]);
 
-    const canvasStream = canvas.captureStream?.(30);
-    if (!canvasStream) { toast.error('Browser does not support canvas capture'); return; }
-    const audioTracks = ensureAudioTracks(video);
-    const outputStream = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
-
-    setVideoDownloading(true); setExportPct(0);
-    const wasTime = video.currentTime, wasPaused = video.paused;
-
+    setRendering(true); setPct(0);
+    const wasT = video.currentTime, wasP = video.paused;
     try {
-      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm';
-      const recorder = new MediaRecorder(outputStream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
-      const chunks: BlobPart[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-      const done = new Promise<Blob>((res, rej) => {
-        recorder.onstop = () => res(new Blob(chunks, { type: 'video/webm' }));
-        recorder.onerror = () => rej(new Error('Recording failed'));
-      });
-
+      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+      const rec = new MediaRecorder(out, { mimeType: mime, videoBitsPerSecond: H >= 1080 ? 12_000_000 : 8_000_000 });
+      const chunks: BlobPart[] = []; rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      const done = new Promise<Blob>((res, rej) => { rec.onstop = () => res(new Blob(chunks, { type: 'video/webm' })); rec.onerror = () => rej(new Error('Recording failed')); });
       let raf = 0;
-      const loop = () => {
-        drawExportFrame(ctx, W, H, video.currentTime);
-        setExportPct(Math.min(99, Math.round((video.currentTime / (video.duration || totalDur)) * 100)));
-        raf = requestAnimationFrame(loop);
-      };
-      recorder.start(100);
-      raf = requestAnimationFrame(loop);
-      video.currentTime = 0;
-      await video.play();
-      await new Promise<void>((resolve) => { const end = () => { video.removeEventListener('ended', end); resolve(); }; video.addEventListener('ended', end); });
-      recorder.stop(); cancelAnimationFrame(raf);
-      const blob = await done;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `${safeName}.webm`; a.click(); URL.revokeObjectURL(url);
-      toast.success('Captioned video downloaded');
-    } catch (e: any) { toast.error(e?.message || 'Export failed'); }
-    finally { video.pause(); video.currentTime = wasTime; if (!wasPaused) video.play().catch(() => {}); setVideoDownloading(false); setExportPct(0); }
+      const loop = () => { drawFrame(ctx, W, H, video.currentTime); setPct(Math.min(99, Math.round((video.currentTime / (video.duration || totalDur)) * 100))); raf = requestAnimationFrame(loop); };
+      rec.start(100); raf = requestAnimationFrame(loop); video.currentTime = 0; await video.play();
+      await new Promise<void>((r) => { const e = () => { video.removeEventListener('ended', e); r(); }; video.addEventListener('ended', e); });
+      rec.stop(); cancelAnimationFrame(raf);
+      const blob = await done; const u = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = u; a.download = `${safeName}_${H}p.webm`; a.click(); URL.revokeObjectURL(u);
+      toast.success('Render complete');
+    } catch (e: any) { toast.error(e?.message || 'Render failed'); }
+    finally { video.pause(); video.currentTime = wasT; if (!wasP) video.play().catch(() => {}); setRendering(false); setPct(0); }
   };
 
-  /* ── live preview: flex wrapper + inline-block box, wraps, never clips ── */
-  const activeText = activeIdx >= 0 ? segments[activeIdx]?.text : '';
-  const overlayText = style.uppercase ? (activeText || '').toUpperCase() : activeText;
-  const useGradient = style.colorMode === 'gradient';
+  /* ── live overlay: per-word styles + emphasis + transitions ── */
+  const activeSeg = activeIdx >= 0 ? segments[activeIdx] : null;
+  const lineSt = activeIdx >= 0 ? effLine(activeIdx) : style;
+  const lineAnim = ANIM[lineSt.transition] || '';
+
+  /* drag caption box on the video to reposition (updates X/Y %) */
+  const dragRef = useRef<{ sx: number; sy: number; px: number; py: number; line: number } | null>(null);
+  const onCapPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    const rect = stageRef.current?.getBoundingClientRect(); if (!rect || activeIdx < 0) return;
+    setSelLine(activeIdx); setSelWords(new Set());
+    dragRef.current = { sx: e.clientX, sy: e.clientY, px: lineSt.posX, py: lineSt.posY, line: activeIdx };
+    const move = (ev: PointerEvent) => {
+      const d = dragRef.current; if (!d) return;
+      const nx = Math.min(98, Math.max(2, d.px + ((ev.clientX - d.sx) / rect.width) * 100));
+      const ny = Math.min(96, Math.max(4, d.py + ((ev.clientY - d.sy) / rect.height) * 100));
+      // Drag moves ALL captions (global) unless this line already has its own position
+      const hasOwn = segments[d.line]?.style?.posX !== undefined || segments[d.line]?.style?.posY !== undefined;
+      if (hasOwn) patchLine(d.line, { posX: nx, posY: ny }); else patchGlobal({ posX: nx, posY: ny });
+    };
+    const up = () => { dragRef.current = null; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+
+  /* resize the caption box: corner handles scale font size, side handles change box width */
+  const startBoxResize = (e: React.PointerEvent, kind: 'corner' | 'width', dx: number, dy: number) => {
+    e.stopPropagation(); e.preventDefault();
+    if (activeIdx < 0) return;
+    const line = activeIdx;
+    const sx = e.clientX, sy = e.clientY;
+    const f0 = lineSt.fontSize, w0 = lineSt.boxWidth ?? 92;
+    const rect = stageRef.current?.getBoundingClientRect();
+    const move = (ev: PointerEvent) => {
+      if (kind === 'corner') {
+        const d = ((ev.clientX - sx) * dx + (ev.clientY - sy) * dy) / 2;
+        patchLine(line, { fontSize: Math.round(Math.min(90, Math.max(10, f0 + d * 0.2))) });
+      } else if (rect) {
+        const d = (((ev.clientX - sx) * dx) / rect.width) * 200;
+        patchLine(line, { boxWidth: Math.round(Math.min(98, Math.max(18, w0 + d))) });
+      }
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+
+  /* Replay the caption animation right where the user is:
+     - a caption is on screen → just re-trigger its animation (no seeking)
+     - a specific line was chosen → jump to it
+     - otherwise → jump to the next caption after the playhead (paused; animation still plays) */
+  const previewFromHere = (preferLine?: number) => {
+    if (segments.length === 0) return;
+    if (preferLine !== undefined && preferLine >= 0) { seekTo(segments[preferLine].start + 0.02); setBump((n) => n + 1); return; }
+    if (activeIdx >= 0) { setBump((n) => n + 1); return; }
+    let idx = segments.findIndex((s) => s.start >= current);
+    if (idx < 0) idx = segments.length - 1;
+    seekTo(segments[idx].start + 0.02); setBump((n) => n + 1);
+  };
+
+  /* Kalakar-style keyword highlight: emphasize every 3rd word of each line */
+  const autoEmphasize = () => {
+    const next: Record<string, Partial<CapStyle>> = {};
+    segments.forEach((s) => {
+      segWords(s, 0).forEach((w) => { if (w.wi % 3 === 2) (next[w.key] = { ...(next[w.key] || {}), emphasized: true } as any); });
+    });
+    setWordStyles(next);
+  };
 
   const overlayWrap: React.CSSProperties = {
-    position: 'absolute', left: 0, right: 0, top: `${style.posY}%`,
-    transform: 'translateY(-50%)',
-    display: 'flex',
-    justifyContent: style.align === 'left' ? 'flex-start' : style.align === 'right' ? 'flex-end' : 'center',
-    padding: '0 4%', pointerEvents: 'none',
+    position: 'absolute', left: `${lineSt.posX}%`, top: `${lineSt.posY}%`,
+    transform: 'translate(-50%,-50%)', width: `${lineSt.boxWidth ?? 92}%`,
+    display: 'flex', justifyContent: 'center', pointerEvents: 'auto', cursor: 'grab',
+    touchAction: 'none', zIndex: 5,
   };
-  const overlayInner: React.CSSProperties = {
-    maxWidth: '100%',
-    fontFamily: withScript(style.fontFamily),
-    fontWeight: style.bold ? Math.max(style.fontWeight, 700) : style.fontWeight,
-    fontSize: `clamp(15px, ${style.fontSize / 11}vw, ${style.fontSize * 1.4}px)`,
-    fontStyle: style.italic ? 'italic' : 'normal',
-    textDecoration: style.underline ? 'underline' : 'none',
-    textAlign: style.align, letterSpacing: `${style.letterSpacing}px`,
-    lineHeight: Math.max(style.lineHeight, 1.35),
-    color: useGradient ? 'transparent' : style.color,
-    ...(useGradient ? { backgroundImage: `linear-gradient(90deg, ${style.color}, ${style.color2})`, WebkitBackgroundClip: 'text', backgroundClip: 'text' as any } : {}),
-    background: (style.background && !useGradient) ? 'rgba(0,0,0,0.72)' : 'transparent',
-    padding: (style.background && !useGradient) ? '0.3em 0.65em' : 0,
-    borderRadius: (style.background && !useGradient) ? '0.5em' : 0,
-    textShadow: style.dropShadow ? '0 4px 18px rgba(0,0,0,.85)' : 'none',
-    WebkitTextStroke: style.textStroke ? '1.2px rgba(0,0,0,.9)' : (undefined as any),
-    whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word',
+  const boxStyle: React.CSSProperties = {
+    maxWidth: '100%', textAlign: lineSt.align,
+    background: lineSt.background ? lineSt.bgColor : 'transparent',
+    padding: lineSt.background ? '0.3em 0.65em' : 0, borderRadius: lineSt.background ? '0.5em' : 0,
+    lineHeight: Math.max(lineSt.lineSpacing, 1.3), whiteSpace: 'normal', overflowWrap: 'break-word',
+    outline: selLine === activeIdx && activeIdx >= 0 ? '1.5px dashed var(--accent)' : 'none',
+    outlineOffset: 4,
   };
+  const wordSpan = (w: WordTok): React.CSSProperties => {
+    const ws = wordStyles[w.key] || {};
+    const em = !!(ws as any).emphasized;
+    const st = { ...lineSt, ...ws } as CapStyle;
+    const useGrad = em ? st.emColorMode === 'gradient' : st.colorMode === 'gradient';
+    const c1 = em ? st.emColor : st.color, c2 = em ? st.emColor2 : st.color2;
+    const size = em ? st.fontSize * (st.emSize / 8) : st.fontSize;
+    const fam = em ? st.emFont : st.fontFamily;
+    const wt = em
+      ? Math.max(st.emBold ? Math.max(st.emWeight, 700) : st.emWeight, st.bold ? 700 : 0)
+      : (st.bold ? Math.max(st.fontWeight, 700) : st.fontWeight);
+    const spotlight = em && st.emphasisMode === 'spotlight';
+    return {
+      display: 'inline-block', margin: '0 .18em',
+      fontFamily: withScript(fam), fontWeight: wt,
+      fontSize: `${Math.max(11, size * fontK)}px`,
+      fontStyle: (st.italic || (em && st.emItalic)) ? 'italic' : 'normal',
+      textDecoration: (st.underline || (em && st.emUnderline)) ? 'underline' : 'none',
+      textTransform: (st.uppercase || (em && st.emUppercase)) ? 'uppercase' : 'none',
+      letterSpacing: `${st.letterSpacing}px`,
+      color: useGrad ? 'transparent' : c1,
+      ...(useGrad ? { backgroundImage: `linear-gradient(90deg, ${c1}, ${c2})`, WebkitBackgroundClip: 'text', backgroundClip: 'text' as any } : {}),
+      ...(spotlight ? { background: c1, color: '#000', padding: '0 .18em', borderRadius: '.2em' } : {}),
+      textShadow: st.glow ? `0 0 12px ${c1}, 0 0 26px ${c1}` : st.dropShadow ? '0 4px 18px rgba(0,0,0,.85)' : 'none',
+      WebkitTextStroke: st.textStroke ? '1.2px rgba(0,0,0,.9)' : (undefined as any),
+      animationDuration: `${animDur(st, activeSeg || undefined)}s`,
+    };
+  };
+
+  const activeWords = useMemo(() => (activeSeg ? segWords({ ...activeSeg, text: shown(activeSeg) }, activeIdx) : []), [activeSeg, activeIdx, romanOn, romanMap]);
 
   const filtered = segments.map((s, i) => ({ s, i })).filter(({ s }) => !search || s.text.toLowerCase().includes(search.toLowerCase()));
 
-  if (loading) {
-    return (
-      <div className="fixed inset-0 z-50 grid place-items-center" style={{ background: 'var(--editor-bg)' }}>
-        <Loader2 className="animate-spin" style={{ color: 'var(--accent)' }} size={30} />
-      </div>
-    );
-  }
+  if (loading) return (<div className="fixed inset-0 z-50 grid place-items-center" style={{ background: 'var(--editor-bg)' }}><Loader2 className="animate-spin" style={{ color: 'var(--accent)' }} size={30} /></div>);
 
-  const CaptionRail = (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-2 px-4 pt-4">
-        <h2 className="text-lg font-extrabold">Captions</h2>
-        <div className="surface flex items-center gap-2 px-2.5 py-1.5" style={{ background: 'var(--editor-panel)' }}>
-          <Search size={14} style={{ color: 'var(--text-muted)' }} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="w-20 bg-transparent text-xs outline-none" />
+  /* ── Caption Tools dropdown ── */
+  const ToolsPanel = (
+    <div className="surface absolute left-3 right-3 top-[92px] z-40 max-h-[70vh] overflow-y-auto p-4 shadow-2xl editor-scroll" style={{ background: 'var(--editor-surface)', borderColor: 'var(--editor-border)' }}>
+      <p className="mb-3 text-center text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Display Settings</p>
+      <div className="grid grid-cols-3 gap-2">
+        <div><label className="mb-1 block text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>Words</label>
+          <select className="input !py-2 text-xs" value={tlMode} onChange={(e) => setTlMode(e.target.value as any)}><option value="word">Default</option><option value="line">Grouped</option></select></div>
+        <div><label className="mb-1 block text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>Max Chars</label>
+          <input type="number" className="input !py-2 text-xs" value={maxChars} onChange={(e) => setMaxChars(Math.max(6, Number(e.target.value)))} /></div>
+        <div><label className="mb-1 block text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>Lines</label>
+          <select className="input !py-2 text-xs" value={lineCount} onChange={(e) => setLineCount(Number(e.target.value))}><option value={1}>1 Line</option><option value={2}>2 Lines</option></select></div>
+      </div>
+      <button onClick={applySplit} className="btn-primary mt-3 w-full !py-2 text-xs">Apply ({maxChars} × {lineCount})</button>
+
+      <p className="mb-2 mt-5 text-center text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Actions</p>
+      <div className="space-y-2">
+        <ToolRow title="Remove Punctuation" desc="Strip all punctuation for a cleaner, minimal look" onClick={rmPunct} />
+        <ToolRow title="Remove Emphasis" desc="Remove all text emphasis for uniform appearance" onClick={rmEmph} />
+        <ToolRow title="Remove Gaps in Captions" desc="Eliminate gaps between captions for seamless flow" onClick={rmGaps} />
+        <ToolRow title="Remove Emojis" desc="Remove all emojis from captions" onClick={rmEmoji} />
+        <ToolRow title={romanOn ? 'Show Native Script' : 'Show Roman Script'} desc="Transliterate captions between native and Roman" onClick={toggleRoman} busy={romanizing} icon={Languages} />
+      </div>
+
+      <p className="mb-2 mt-5 text-center text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Timing</p>
+      <div className="surface p-3" style={{ background: 'var(--editor-panel)' }}>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="flex items-center gap-2 text-sm font-semibold"><Clock size={14} style={{ color: 'var(--accent)' }} /> Caption Delay</span>
+          <span className="text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>{delay === 0 ? 'No delay' : `${delay > 0 ? '+' : ''}${delay.toFixed(1)}s`}</span>
         </div>
-      </div>
-      <div className="px-4 pb-3 pt-2">
-        <button className="surface flex w-full items-center justify-between px-3 py-2 text-sm font-semibold" style={{ background: 'var(--editor-panel)' }}>
-          <span className="flex items-center gap-2"><Settings2 size={14} style={{ color: 'var(--accent)' }} /> Caption Tools</span>
-          <ChevronRight size={14} style={{ color: 'var(--text-muted)' }} />
-        </button>
-      </div>
-      <div className="editor-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 pb-4">
-        {filtered.length === 0 ? (
-          <p className="py-8 text-center text-xs" style={{ color: 'var(--text-muted)' }}>No captions</p>
-        ) : filtered.map(({ s, i }) => (
-          <div key={s.id ?? i} onClick={() => { setSelectedIdx(i); seekTo(s.start); }}
-            className="group flex cursor-pointer items-center gap-3 rounded-2xl border px-3 py-2.5 transition"
-            style={{
-              background: i === activeIdx ? 'rgba(79,140,255,0.10)' : 'var(--editor-surface)',
-              borderColor: i === selectedIdx ? 'var(--accent)' : i === activeIdx ? 'rgba(79,140,255,0.4)' : 'var(--editor-border)',
-            }}>
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold"
-              style={{ background: i === activeIdx ? 'var(--accent)' : 'var(--editor-panel)', color: i === activeIdx ? '#fff' : 'var(--text-muted)' }}>{i + 1}</span>
-            <input value={s.text} onChange={(e) => updateText(i, e.target.value)} onFocus={() => setSelectedIdx(i)} className="flex-1 bg-transparent text-sm outline-none" style={{ fontFamily: withScript("'Inter', sans-serif") }} />
-            <button onClick={(e) => { e.stopPropagation(); removeSeg(i); }} className="shrink-0 opacity-0 transition group-hover:opacity-100" style={{ color: '#ef4444' }}><Trash2 size={14} /></button>
-          </div>
-        ))}
+        <input type="range" min={-5} max={5} step={0.1} value={delay} onChange={(e) => setDelayV(Number(e.target.value))} className="w-full" />
+        <div className="mt-1 flex justify-between text-[10px]" style={{ color: 'var(--text-muted)' }}><span>-5s</span><span>0</span><span>+5s</span></div>
       </div>
     </div>
   );
 
-  const Inspector = (
+  /* ── Line Styling popover (⊞ on each caption row) ── */
+  const LineStyling = lineStylingFor === null ? null : (() => {
+    const i = lineStylingFor; const st = effLine(i);
+    return (
+      <div className="fixed inset-0 z-[70]" onClick={() => setLineStylingFor(null)}>
+        <div className="absolute inset-0 bg-black/40" />
+        <div className="surface absolute left-1/2 top-1/2 max-h-[80vh] w-[420px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 overflow-y-auto p-0 shadow-2xl editor-scroll"
+          style={{ background: 'var(--editor-surface)', borderColor: 'var(--editor-border)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--editor-border)' }}>
+            <span className="flex items-center gap-2 text-sm font-bold"><LayoutGrid size={16} style={{ color: 'var(--accent)' }} /> LINE STYLING</span>
+            <span className="rounded-full px-3 py-1 text-[11px] font-semibold" style={{ background: 'var(--editor-panel)', color: 'var(--text-muted)' }}>Line {i + 1}</span>
+          </div>
+
+          <button onClick={() => setCollapsed((c) => ({ ...c, typo: !c.typo }))} className="flex w-full items-center gap-2 border-b px-4 py-3 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: 'var(--editor-border)', color: 'var(--text-muted)' }}>
+            {collapsed.typo ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Typography
+          </button>
+          {collapsed.typo && (
+            <div className="space-y-3 border-b px-4 py-3" style={{ borderColor: 'var(--editor-border)' }}>
+              <Row label="Font Family"><select className="input !py-2 text-sm" value={st.fontFamily} onChange={(e) => patchLine(i, { fontFamily: e.target.value })}>{FONTS.map((f) => <option key={f.label} value={f.family}>{f.label}</option>)}</select></Row>
+              <Row label="Font Face"><select className="input !py-2 text-sm" value={st.fontWeight} onChange={(e) => patchLine(i, { fontWeight: Number(e.target.value) })}>{WEIGHTS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}</select></Row>
+              <Row label="Size"><input type="range" min={12} max={72} value={st.fontSize} onChange={(e) => patchLine(i, { fontSize: Number(e.target.value) })} className="w-full" /></Row>
+              <Row label="Color"><div className="flex items-center gap-2"><input type="color" value={st.color} onChange={(e) => patchLine(i, { color: e.target.value })} className="h-8 w-10 rounded border-0 bg-transparent" /><input className="input !py-2 text-sm font-mono" value={st.color} onChange={(e) => patchLine(i, { color: e.target.value })} /></div></Row>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--editor-border)' }}>
+            <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Background</span>
+            <Switch on={st.background} onClick={() => patchLine(i, { background: !st.background })} />
+          </div>
+
+          <div className="border-b px-4 py-3" style={{ borderColor: 'var(--editor-border)' }}>
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Position</p>
+            <div className="surface p-3" style={{ background: 'var(--editor-panel)' }}>
+              <p className="mb-2 text-xs" style={{ color: 'var(--text-muted)' }}>Position</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs">X</span>
+                <input type="number" className="input !py-1.5 text-xs" value={st.posX.toFixed(1)} onChange={(e) => patchLine(i, { posX: Number(e.target.value) })} />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>%</span>
+                <button onClick={() => patchLine(i, { posX: DEFAULT_STYLE.posX })} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-surface)' }}><RotateCcw size={13} /></button>
+                <span className="text-xs">Y</span>
+                <input type="number" className="input !py-1.5 text-xs" value={st.posY.toFixed(1)} onChange={(e) => patchLine(i, { posY: Number(e.target.value) })} />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>%</span>
+                <button onClick={() => patchLine(i, { posY: DEFAULT_STYLE.posY })} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-surface)' }}><RotateCcw size={13} /></button>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-4 py-3">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Templates</p>
+            <div className="surface mb-3 flex items-center gap-2 px-3 py-2" style={{ background: 'var(--editor-panel)' }}>
+              <SearchIcon size={14} style={{ color: 'var(--text-muted)' }} />
+              <input value={tplSearch} onChange={(e) => setTplSearch(e.target.value)} placeholder="Search templates..." className="w-full bg-transparent text-sm outline-none" />
+            </div>
+            <div className="space-y-2">
+              {TEMPLATES.filter((t) => t.name.toLowerCase().includes(tplSearch.toLowerCase())).map((t) => (
+                <button key={t.name} onClick={() => { patchLine(i, t.patch); toast.success(`${t.name} → Line ${i + 1}`); }} className="surface w-full p-3 text-left" style={{ background: 'var(--editor-panel)', borderColor: 'var(--editor-border)' }}>
+                  <div className="mb-2 flex items-center gap-1.5"><span className="text-sm font-bold">{t.name}</span>{t.premium && <span className="text-xs">👑</span>}</div>
+                  <TplPreview t={t} />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  })();
+
+  const CaptionRail = (
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between gap-2 px-4 pt-4">
+        <h2 className="text-xl font-extrabold">Captions</h2>
+        <div className="flex items-center gap-2">
+          <button className="grid h-9 w-9 place-items-center rounded-full" style={{ background: 'var(--editor-panel)' }}><Search size={15} /></button>
+          <button onClick={() => setShowTools((v) => !v)} className="flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold" style={{ background: 'var(--editor-panel)', color: showTools ? 'var(--accent)' : 'var(--text)' }}>
+            <Settings2 size={14} style={{ color: 'var(--accent)' }} /> Caption Tools <ChevronDown size={13} style={{ transform: showTools ? 'rotate(180deg)' : 'none' }} />
+          </button>
+        </div>
+      </div>
+      <div className="px-4 pb-2 pt-3">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search captions…" className="input !py-2 text-xs" />
+      </div>
+      {showTools && ToolsPanel}
+      <div className="editor-scroll min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+        {filtered.map(({ s, i }) => {
+          const on = i === activeIdx, sel = i === selLine;
+          return (
+            <div key={s.id} onClick={() => { setSelLine(i); setSelWords(new Set()); seekTo(s.start); }}
+              className="group flex cursor-pointer items-center gap-3 rounded-2xl border px-3 py-3 transition"
+              style={{ background: sel ? 'rgba(79,140,255,.10)' : 'transparent', borderColor: sel ? 'var(--accent)' : 'transparent' }}>
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold"
+                style={{ background: on ? 'var(--accent)' : 'transparent', color: on ? '#fff' : 'var(--text-muted)', border: on ? 'none' : '1px solid var(--editor-border)' }}>{i + 1}</span>
+              <input value={shown(s)} onChange={(e) => updateText(i, e.target.value)} onFocus={() => { setSelLine(i); setSelWords(new Set()); }}
+                className="flex-1 bg-transparent text-[15px] outline-none" style={{ fontFamily: withScript("'Inter',sans-serif") }} />
+              <button onClick={(e) => { e.stopPropagation(); setLineStylingFor(i); setCollapsed((c) => ({ ...c, typo: true })); }}
+                title="Line styling" className="shrink-0 rounded-md p-1.5 transition" style={{ color: 'var(--text-muted)' }}>
+                <LayoutGrid size={17} />
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); removeSeg(i); }} className="shrink-0 opacity-0 transition group-hover:opacity-100" style={{ color: '#ef4444' }}><Trash2 size={14} /></button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const selWordText = selWords.size === 1 ? allWords.find((w) => w.key === Array.from(selWords)[0])?.text : null;
+
+  const ExportPanel = (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="px-4 pt-5"><h2 className="text-2xl font-extrabold">Export</h2></div>
+      <div className="editor-scroll min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+        {isFree && (TEMPLATES.find((t) => t.name === appliedTpl)?.premium || expRes === '1080') && (
+          <div className="flex gap-3 rounded-2xl border p-4" style={{ borderColor: 'rgba(239,68,68,.4)', background: 'rgba(239,68,68,.08)' }}>
+            <Ban size={18} className="mt-0.5 shrink-0" style={{ color: '#ef4444' }} />
+            <p className="text-sm leading-snug" style={{ color: '#f87171' }}>
+              Premium templates are preview-only on your plan. Switch to a free template to render now, or upgrade to use this one.
+            </p>
+          </div>
+        )}
+        <div>
+          <label className="mb-2 block text-sm font-bold">Type</label>
+          <select className="input" value={expType} onChange={(e) => setExpType(e.target.value as any)}>
+            <option value="video">Video</option><option value="srt">Subtitles (.srt)</option><option value="txt">Transcript (.txt)</option>
+          </select>
+        </div>
+        {expType === 'video' && (
+          <div>
+            <label className="mb-2 block text-sm font-bold">Resolution</label>
+            <select className="input" value={expRes} onChange={(e) => setExpRes(e.target.value as any)}>
+              <option value="720">720P</option><option value="1080">1080P {isFree ? '(Premium)' : ''}</option>
+            </select>
+          </div>
+        )}
+        {rendering && (
+          <div className="surface p-4" style={{ background: 'var(--editor-panel)' }}>
+            <div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold">Rendering…</span><span className="tabular-nums">{pct}%</span></div>
+            <div className="h-2 overflow-hidden rounded-full" style={{ background: 'var(--editor-border)' }}><div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'var(--accent)' }} /></div>
+            <p className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>Rendering plays the video once in real time. Keep this tab open.</p>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-3 border-t p-3" style={{ borderColor: 'var(--editor-border)' }}>
+        <button onClick={() => setExportOpen(false)} className="btn-ghost flex-1 !py-3">Back</button>
+        <button onClick={render} disabled={rendering} className="btn-primary flex-1 !py-3 disabled:opacity-50">{rendering ? <Loader2 size={16} className="animate-spin" /> : null} Render</button>
+      </div>
+    </div>
+  );
+
+  const Inspector = exportOpen ? ExportPanel : (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex gap-1 border-b px-3 pt-3" style={{ borderColor: 'var(--editor-border)' }}>
-        {[{ id: 'text', label: 'Text' }, { id: 'templates', label: 'Templates' }, { id: 'transitions', label: 'Transitions' }, { id: 'audio', label: 'AI Audio' }].map((t) => {
-          const on = tab === t.id;
-          return (
-            <button key={t.id} onClick={() => setTab(t.id as typeof tab)} className="relative px-2.5 py-2.5 text-xs font-semibold transition" style={{ color: on ? 'var(--accent)' : 'var(--text-muted)' }}>
-              {t.label}{on && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full" style={{ background: 'var(--accent)' }} />}
-            </button>
-          );
+        {(['text', 'templates', 'transitions', 'audio'] as const).map((t) => {
+          const on = tab === t; const label = t === 'audio' ? 'AI Audio' : t[0].toUpperCase() + t.slice(1);
+          return (<button key={t} onClick={() => setTab(t)} className="relative px-3 py-2.5 text-[13px] font-semibold transition" style={{ color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{label}{on && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full" style={{ background: 'var(--accent)' }} />}</button>);
         })}
       </div>
 
@@ -469,131 +907,250 @@ export default function EditorPage() {
         {tab === 'text' && (
           <div className="space-y-5">
             <div className="surface p-3" style={{ background: 'var(--editor-panel)' }}>
-              <div className="mb-2 flex items-center justify-between"><span className="text-xs font-bold">Editing Line</span><span className="text-[11px]" style={{ color: 'var(--accent)' }}>select a caption</span></div>
-              <input value={selectedIdx >= 0 ? segments[selectedIdx]?.text ?? '' : ''} onChange={(e) => selectedIdx >= 0 && updateText(selectedIdx, e.target.value)} placeholder="Edit line text…" className="input !py-2.5 text-sm" style={{ fontFamily: withScript("'Inter', sans-serif") }} />
-              <button onClick={() => setSelectedIdx(-1)} className="btn-ghost mt-2 w-full !py-2 text-xs">Clear Selection</button>
+              <div className="mb-2 flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-surface)' }}>
+                <Tab2 on={txtScope === 'all'} onClick={() => setTxtScope('all')}>All Captions</Tab2>
+                <Tab2 on={txtScope === 'line'} onClick={() => { if (selLine >= 0) setTxtScope('line'); else toast('Select a caption first', { icon: 'ℹ️' }); }}>This Line</Tab2>
+                <Tab2 on={txtScope === 'word'} onClick={() => { if (selWords.size > 0) setTxtScope('word'); else toast('Select word(s) in the timeline first', { icon: 'ℹ️' }); }}>Word</Tab2>
+              </div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[13px] font-semibold">{txtScope === 'word' ? 'Editing Word Style' : txtScope === 'line' ? `Editing Line ${selLine + 1}` : 'Editing All Captions'}</span>
+                <span className="text-[11px]" style={{ color: '#f5b74f' }}>{txtScope === 'word' ? 'Styles apply to selected word(s) only' : txtScope === 'line' ? 'Applies to this line' : 'Applies to every caption'}</span>
+              </div>
+              {selWordText && (<div className="mb-2 flex items-center gap-2 px-1"><span className="text-lg font-semibold" style={{ color: 'var(--accent)' }}>{selWordText}</span><Check size={16} style={{ color: 'var(--accent)' }} /></div>)}
+              <input className="input !py-2.5 text-sm" value={selWords.size === 1 ? (selWordText || '') : selLine >= 0 ? shown(segments[selLine]) : ''} readOnly={selWords.size > 0}
+                onChange={(e) => selLine >= 0 && selWords.size === 0 && updateText(selLine, e.target.value)} placeholder="Select a caption or word…" />
+              <button onClick={() => { setSelWords(new Set()); setSelLine(-1); }} className="btn-ghost mt-2 w-full !py-2 text-xs">Clear Selection</button>
             </div>
 
-            <Section title="Fonts">
-              <Field label="Font Family">
-                <select className="input !py-2 text-sm" value={style.fontFamily} onChange={(e) => patchStyle({ fontFamily: e.target.value })}>
-                  {FONTS.map((f) => <option key={f.label} value={f.family}>{f.label}</option>)}
-                </select>
-              </Field>
-              <Field label="Font Face">
-                <select className="input !py-2 text-sm" value={style.fontWeight} onChange={(e) => patchStyle({ fontWeight: Number(e.target.value) })}>
-                  {WEIGHTS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-                </select>
-              </Field>
-              <div className="flex items-center gap-3">
-                <input type="range" min={12} max={72} value={style.fontSize} className="flex-1" onChange={(e) => patchStyle({ fontSize: Number(e.target.value) })} />
-                <div className="surface flex w-20 items-center justify-between px-2 py-1.5 text-sm" style={{ background: 'var(--editor-panel)' }}><span>{style.fontSize}</span><span style={{ color: 'var(--text-muted)' }}>px</span></div>
-                <button onClick={() => patchStyle({ fontSize: DEFAULT_STYLE.fontSize })} title="Reset" className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><RefreshCw size={13} /></button>
-              </div>
-            </Section>
-
-            <Section title="Format">
-              <label className="mb-1.5 block text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Styles</label>
-              <div className="grid grid-cols-4 gap-2">
-                <Toggle active={style.uppercase} onClick={() => patchStyle({ uppercase: !style.uppercase })}><span className="text-sm font-bold">Tt</span></Toggle>
-                <Toggle active={style.bold} onClick={() => patchStyle({ bold: !style.bold })}><span className="text-sm font-black">T</span></Toggle>
-                <Toggle active={style.italic} onClick={() => patchStyle({ italic: !style.italic })}><span className="text-sm font-bold italic">t</span></Toggle>
-                <Toggle active={style.underline} onClick={() => patchStyle({ underline: !style.underline })}><span className="text-sm font-bold underline">U</span></Toggle>
-              </div>
-              <label className="mb-1.5 mt-4 block text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Text Alignment</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['left', 'center', 'right'] as const).map((a) => (
-                  <Toggle key={a} active={style.align === a} onClick={() => patchStyle({ align: a })}>
-                    <div className="flex w-full flex-col gap-0.5 px-1" style={{ alignItems: a === 'left' ? 'flex-start' : a === 'right' ? 'flex-end' : 'center' }}>
-                      <span className="block h-0.5 w-4 rounded bg-current" /><span className="block h-0.5 w-2.5 rounded bg-current" /><span className="block h-0.5 w-4 rounded bg-current" />
-                    </div>
-                  </Toggle>
-                ))}
-              </div>
-            </Section>
-
-            <Section title="Position">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="X %"><input type="number" className="input !py-2 text-sm" value={Math.round(style.posX)} onChange={(e) => patchStyle({ posX: Math.max(0, Math.min(100, Number(e.target.value))) })} /></Field>
-                <Field label="Y %"><input type="number" className="input !py-2 text-sm" value={Math.round(style.posY)} onChange={(e) => patchStyle({ posY: Math.max(0, Math.min(100, Number(e.target.value))) })} /></Field>
-              </div>
-            </Section>
-
-            <Section title="Color">
-              <div className="mb-2 grid grid-cols-2 gap-2">
-                <Toggle active={style.colorMode === 'solid'} onClick={() => patchStyle({ colorMode: 'solid' })}><span className="text-xs font-semibold">Solid</span></Toggle>
-                <Toggle active={style.colorMode === 'gradient'} onClick={() => patchStyle({ colorMode: 'gradient' })}><span className="text-xs font-semibold">Gradient</span></Toggle>
-              </div>
+            <Group title="Fonts" open={collapsed.fonts !== false} onToggle={() => setCollapsed((c) => ({ ...c, fonts: c.fonts === false }))}>
+              <Stepper label="Font Family" value={FONTS.find((f) => f.family === targetStyle.fontFamily)?.label || 'Inter'}
+                onPrev={() => { const i = FONTS.findIndex((f) => f.family === targetStyle.fontFamily); patchTarget({ fontFamily: FONTS[(i - 1 + FONTS.length) % FONTS.length].family }); }}
+                onNext={() => { const i = FONTS.findIndex((f) => f.family === targetStyle.fontFamily); patchTarget({ fontFamily: FONTS[(i + 1) % FONTS.length].family }); }}
+                onReset={() => patchTarget({ fontFamily: DEFAULT_STYLE.fontFamily })} />
+              <Stepper label="Font Face" value={WEIGHTS.find((w) => w.value === targetStyle.fontWeight)?.label || 'Regular'}
+                onPrev={() => { const i = WEIGHTS.findIndex((w) => w.value === targetStyle.fontWeight); patchTarget({ fontWeight: WEIGHTS[(i - 1 + WEIGHTS.length) % WEIGHTS.length].value }); }}
+                onNext={() => { const i = WEIGHTS.findIndex((w) => w.value === targetStyle.fontWeight); patchTarget({ fontWeight: WEIGHTS[(i + 1) % WEIGHTS.length].value }); }}
+                onReset={() => patchTarget({ fontWeight: DEFAULT_STYLE.fontWeight })} />
               <div className="flex items-center gap-2">
-                <input type="color" value={style.color} onChange={(e) => patchStyle({ color: e.target.value })} className="h-9 w-10 shrink-0 cursor-pointer rounded-lg border-0 bg-transparent" />
-                <input value={style.color} onChange={(e) => patchStyle({ color: e.target.value })} className="input !py-2 text-sm font-mono uppercase" />
-                {style.colorMode === 'gradient' && <input type="color" value={style.color2} onChange={(e) => patchStyle({ color2: e.target.value })} className="h-9 w-10 shrink-0 cursor-pointer rounded-lg border-0 bg-transparent" />}
+                <input type="range" min={10} max={90} value={targetStyle.fontSize} onChange={(e) => patchTarget({ fontSize: Number(e.target.value) })} className="flex-1" />
+                <div className="surface flex w-[74px] items-center justify-between px-2 py-1.5 text-sm" style={{ background: 'var(--editor-panel)' }}><span>{targetStyle.fontSize}</span><span className="text-xs" style={{ color: 'var(--text-muted)' }}>px</span></div>
+                <div className="flex flex-col">
+                  <button onClick={() => patchTarget({ fontSize: Math.min(90, targetStyle.fontSize + 1) })} className="grid h-[18px] w-7 place-items-center rounded-t-md" style={{ background: 'var(--editor-panel)' }}><ChevronUp size={11} /></button>
+                  <button onClick={() => patchTarget({ fontSize: Math.max(10, targetStyle.fontSize - 1) })} className="grid h-[18px] w-7 place-items-center rounded-b-md" style={{ background: 'var(--editor-panel)' }}><ChevronDown size={11} /></button>
+                </div>
+                <IconBtn onClick={() => patchTarget({ fontSize: DEFAULT_STYLE.fontSize })}><RotateCcw size={13} /></IconBtn>
               </div>
-            </Section>
+            </Group>
 
-            <Section title="Spacing">
-              <Field label={`Letter spacing (${style.letterSpacing}px)`}><input type="range" min={-2} max={12} value={style.letterSpacing} className="w-full" onChange={(e) => patchStyle({ letterSpacing: Number(e.target.value) })} /></Field>
-              <Field label={`Line height (${style.lineHeight.toFixed(2)})`}><input type="range" min={1} max={2} step={0.05} value={style.lineHeight} className="w-full" onChange={(e) => patchStyle({ lineHeight: Number(e.target.value) })} /></Field>
-            </Section>
+            <Group title="Format" open={collapsed.format !== false} onToggle={() => setCollapsed((c) => ({ ...c, format: c.format === false }))}>
+              <div className="flex items-center justify-between"><span className="text-sm" style={{ color: 'var(--text-muted)' }}>Styles</span>
+                <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+                  <Seg2 on={targetStyle.uppercase} onClick={() => patchTarget({ uppercase: !targetStyle.uppercase })}><span className="text-sm font-bold">Tt</span></Seg2>
+                  <Seg2 on={targetStyle.bold} onClick={() => patchTarget({ bold: !targetStyle.bold })}><span className="text-sm font-black">T</span></Seg2>
+                  <Seg2 on={targetStyle.italic} onClick={() => patchTarget({ italic: !targetStyle.italic })}><span className="text-sm font-bold italic">t</span></Seg2>
+                  <Seg2 on={targetStyle.underline} onClick={() => patchTarget({ underline: !targetStyle.underline })}><span className="text-sm font-bold underline">U</span></Seg2>
+                </div>
+              </div>
+              <div className="flex items-center justify-between"><span className="text-sm" style={{ color: 'var(--text-muted)' }}>Text Alignment</span>
+                <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+                  <Seg2 on={targetStyle.align === 'left'} onClick={() => patchTarget({ align: 'left' })}><AlignLeft size={15} /></Seg2>
+                  <Seg2 on={targetStyle.align === 'center'} onClick={() => patchTarget({ align: 'center' })}><AlignCenter size={15} /></Seg2>
+                  <Seg2 on={targetStyle.align === 'right'} onClick={() => patchTarget({ align: 'right' })}><AlignRight size={15} /></Seg2>
+                </div>
+              </div>
+            </Group>
 
-            <Section title="Effects">
-              <SwitchRow label="Drop Shadow" on={style.dropShadow} onClick={() => patchStyle({ dropShadow: !style.dropShadow })} />
-              <SwitchRow label="Text Stroke" on={style.textStroke} onClick={() => patchStyle({ textStroke: !style.textStroke })} />
-              <SwitchRow label="Background" on={style.background} onClick={() => patchStyle({ background: !style.background })} />
-            </Section>
+            <Group title="Position" open={collapsed.pos !== false} onToggle={() => setCollapsed((c) => ({ ...c, pos: c.pos === false }))}>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">X</span>
+                <input type="number" className="input !py-2 text-sm" value={targetStyle.posX.toFixed(1)} onChange={(e) => patchTarget({ posX: Number(e.target.value) })} />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>%</span>
+                <IconBtn onClick={() => patchTarget({ posX: DEFAULT_STYLE.posX })}><RotateCcw size={13} /></IconBtn>
+                <span className="text-sm">Y</span>
+                <input type="number" className="input !py-2 text-sm" value={targetStyle.posY.toFixed(1)} onChange={(e) => patchTarget({ posY: Number(e.target.value) })} />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>%</span>
+                <IconBtn onClick={() => patchTarget({ posY: DEFAULT_STYLE.posY })}><RotateCcw size={13} /></IconBtn>
+              </div>
+            </Group>
+
+            <Group title="Color" open={collapsed.color !== false} onToggle={() => setCollapsed((c) => ({ ...c, color: c.color === false }))}>
+              <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+                <Tab2 on={targetStyle.colorMode === 'solid'} onClick={() => patchTarget({ colorMode: 'solid' })}><Circle size={12} /> Solid</Tab2>
+                <Tab2 on={targetStyle.colorMode === 'gradient'} onClick={() => patchTarget({ colorMode: 'gradient' })}><Palette size={12} /> Gradient</Tab2>
+              </div>
+              <ColorRow label="Color" value={targetStyle.color} onChange={(v) => patchTarget({ color: v })} onReset={() => patchTarget({ color: DEFAULT_STYLE.color })} />
+              {targetStyle.colorMode === 'gradient' && <ColorRow label="Color 2" value={targetStyle.color2} onChange={(v) => patchTarget({ color2: v })} onReset={() => patchTarget({ color2: DEFAULT_STYLE.color2 })} />}
+            </Group>
+
+            <Group title="Emphasis" open={collapsed.emph !== false} onToggle={() => setCollapsed((c) => ({ ...c, emph: c.emph === false }))}>
+              {selWords.size === 0 && <p className="text-[11px]" style={{ color: '#f5b74f' }}>Select one or more words in the timeline to emphasize them.</p>}
+              <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+                <Tab2 on={targetStyle.emphasisMode === 'emphasize'} onClick={() => patchTarget({ emphasisMode: 'emphasize', ...( selWords.size ? { emphasized: true } as any : {}) })}>Emphasize</Tab2>
+                <Tab2 on={targetStyle.emphasisMode === 'spotlight'} onClick={() => patchTarget({ emphasisMode: 'spotlight', ...( selWords.size ? { emphasized: true } as any : {}) })}>Spotlight</Tab2>
+              </div>
+              <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+                <Tab2 on={targetStyle.emColorMode === 'solid'} onClick={() => patchTarget({ emColorMode: 'solid' })}><Circle size={12} /> Solid</Tab2>
+                <Tab2 on={targetStyle.emColorMode === 'gradient'} onClick={() => patchTarget({ emColorMode: 'gradient' })}><Palette size={12} /> Gradient</Tab2>
+              </div>
+              <ColorRow label="Color" value={targetStyle.emColor} onChange={(v) => patchTarget({ emColor: v, ...(selWords.size ? { emphasized: true } as any : {}) })} onReset={() => patchTarget({ emColor: DEFAULT_STYLE.emColor })} />
+              <div className="flex items-center gap-2">
+                <span className="w-16 text-sm" style={{ color: 'var(--text-muted)' }}>Size</span>
+                <input type="range" min={4} max={16} step={0.1} value={targetStyle.emSize} onChange={(e) => patchTarget({ emSize: Number(e.target.value) })} className="flex-1" />
+                <div className="surface w-14 px-2 py-1.5 text-center text-sm" style={{ background: 'var(--editor-panel)' }}>{targetStyle.emSize.toFixed(1)}</div>
+                <IconBtn onClick={() => patchTarget({ emSize: DEFAULT_STYLE.emSize })}><RotateCcw size={13} /></IconBtn>
+              </div>
+              <Stepper label="Font" value={FONTS.find((f) => f.family === targetStyle.emFont)?.label || 'Inter'}
+                onPrev={() => { const i = FONTS.findIndex((f) => f.family === targetStyle.emFont); patchTarget({ emFont: FONTS[(i - 1 + FONTS.length) % FONTS.length].family }); }}
+                onNext={() => { const i = FONTS.findIndex((f) => f.family === targetStyle.emFont); patchTarget({ emFont: FONTS[(i + 1) % FONTS.length].family }); }}
+                onReset={() => patchTarget({ emFont: DEFAULT_STYLE.emFont })} bold />
+              <Stepper label="Font Face" value={WEIGHTS.find((w) => w.value === targetStyle.emWeight)?.label || 'Black'}
+                onPrev={() => { const i = WEIGHTS.findIndex((w) => w.value === targetStyle.emWeight); patchTarget({ emWeight: WEIGHTS[(i - 1 + WEIGHTS.length) % WEIGHTS.length].value }); }}
+                onNext={() => { const i = WEIGHTS.findIndex((w) => w.value === targetStyle.emWeight); patchTarget({ emWeight: WEIGHTS[(i + 1) % WEIGHTS.length].value }); }}
+                onReset={() => patchTarget({ emWeight: DEFAULT_STYLE.emWeight })} />
+              <div className="flex items-center justify-between"><span className="text-sm" style={{ color: 'var(--text-muted)' }}>Emphasis Styles</span>
+                <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+                  <Seg2 on={targetStyle.emUppercase} onClick={() => patchTarget({ emUppercase: !targetStyle.emUppercase })}><span className="text-sm font-bold">Tt</span></Seg2>
+                  <Seg2 on={targetStyle.emBold} onClick={() => patchTarget({ emBold: !targetStyle.emBold })}><span className="text-sm font-black">T</span></Seg2>
+                  <Seg2 on={targetStyle.emItalic} onClick={() => patchTarget({ emItalic: !targetStyle.emItalic })}><span className="text-sm font-bold italic">t</span></Seg2>
+                  <Seg2 on={targetStyle.emUnderline} onClick={() => patchTarget({ emUnderline: !targetStyle.emUnderline })}><span className="text-sm font-bold underline">U</span></Seg2>
+                </div>
+              </div>
+            </Group>
+
+            <Group title="Spacing" open={collapsed.spacing !== false} onToggle={() => setCollapsed((c) => ({ ...c, spacing: c.spacing === false }))}>
+              <SliderRow label="Letter Spacing" min={-2} max={12} step={1} value={targetStyle.letterSpacing} onChange={(v) => patchTarget({ letterSpacing: v })} onReset={() => patchTarget({ letterSpacing: 0 })} />
+              <SliderRow label="Line Spacing" min={0.8} max={2.2} step={0.05} value={targetStyle.lineSpacing} onChange={(v) => patchTarget({ lineSpacing: v })} onReset={() => patchTarget({ lineSpacing: DEFAULT_STYLE.lineSpacing })} />
+            </Group>
+
+            <Group title="Effects" open={collapsed.fx !== false} onToggle={() => setCollapsed((c) => ({ ...c, fx: c.fx === false }))}>
+              <SwitchRow label="Drop Shadow" on={targetStyle.dropShadow} onClick={() => patchTarget({ dropShadow: !targetStyle.dropShadow })} />
+              <SwitchRow label="Glow" on={targetStyle.glow} onClick={() => patchTarget({ glow: !targetStyle.glow })} />
+              <SwitchRow label="Text Stroke" on={targetStyle.textStroke} onClick={() => patchTarget({ textStroke: !targetStyle.textStroke })} />
+              <SwitchRow label="Background" on={targetStyle.background} onClick={() => patchTarget({ background: !targetStyle.background })} />
+              {targetStyle.background && (
+                <ColorRow label="Bg Color" value={targetStyle.bgColor.startsWith('#') ? targetStyle.bgColor : '#000000'} onChange={(v) => patchTarget({ bgColor: v })} onReset={() => patchTarget({ bgColor: DEFAULT_STYLE.bgColor })} />
+              )}
+            </Group>
           </div>
         )}
 
         {tab === 'templates' && (
-          <div className="space-y-3">
-            {(dbTemplates.length > 0 ? dbTemplates : TEMPLATES).map((t: any, idx: number) => {
-              const patch = t.patch || {
-                fontFamily: t.fontFamily || DEFAULT_STYLE.fontFamily,
-                fontWeight: parseInt(t.fontWeight) || DEFAULT_STYLE.fontWeight,
-                fontSize: parseInt(t.fontSize) || DEFAULT_STYLE.fontSize,
-                bold: t.bold === 'true' || t.bold === true,
-                uppercase: t.uppercase === 'true' || t.uppercase === true,
-                color: t.color || DEFAULT_STYLE.color,
-                dropShadow: t.dropShadow !== 'false' && t.dropShadow !== false,
-                background: t.background !== 'false' && t.background !== false,
-              };
-              return (
-                <button key={t.id || t.name || idx} onClick={() => { patchStyle(patch); toast.success(`${t.name} applied`); }}
-                  className="surface w-full p-4 text-left transition hover:opacity-90" style={{ background: 'var(--editor-surface)', borderColor: 'var(--editor-border)' }}>
-                  <div className="mb-3 flex items-center justify-between"><span className="font-bold">{t.name}</span><span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{t.tag || 'Custom'}</span></div>
-                  <div className="grid h-16 place-items-center rounded-xl" style={{ background: 'var(--editor-panel)' }}>
-                    <span style={{
-                      fontFamily: withScript(patch.fontFamily), fontWeight: patch.fontWeight,
-                      color: patch.colorMode === 'gradient' ? 'transparent' : patch.color,
-                      backgroundImage: patch.colorMode === 'gradient' ? `linear-gradient(90deg, ${patch.color}, ${patch.color2})` : undefined,
-                      WebkitBackgroundClip: patch.colorMode === 'gradient' ? 'text' : undefined,
-                      textShadow: patch.dropShadow ? '0 2px 12px rgba(0,0,0,.6)' : undefined,
-                      background: patch.background ? '#fff' : undefined,
-                      padding: patch.background ? '4px 10px' : undefined, borderRadius: patch.background ? 8 : undefined, fontSize: 18,
-                    }}>{patch.uppercase ? 'PREVIEW' : 'Preview'}</span>
+          <div className="space-y-4">
+            <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+              <Tab2 on={tplTab === 'builtin'} onClick={() => setTplTab('builtin')}>Built-in Templates</Tab2>
+              <Tab2 on={tplTab === 'presets'} onClick={() => setTplTab('presets')}>My Presets</Tab2>
+            </div>
+            <div className="flex gap-2">
+              <div className="surface flex flex-1 items-center gap-2 px-3 py-2" style={{ background: 'var(--editor-panel)' }}>
+                <SearchIcon size={14} style={{ color: 'var(--text-muted)' }} />
+                <input value={tplSearch} onChange={(e) => setTplSearch(e.target.value)} placeholder="Find a template" className="w-full bg-transparent text-sm outline-none" />
+              </div>
+              <button onClick={savePreset} className="btn-ghost !px-3 !py-2 text-xs"><Bookmark size={14} /> Save preset</button>
+            </div>
+
+            {(tplTab === 'builtin' ? TEMPLATES : presets.map((p) => ({ name: p.name, patch: p.patch } as Tpl)))
+              .filter((t) => t.name.toLowerCase().includes(tplSearch.toLowerCase()))
+              .map((t) => {
+                const active = appliedTpl === t.name;
+                return (
+                  <div key={t.name} className="surface overflow-hidden p-0" style={{ borderColor: active ? 'var(--accent)' : 'var(--editor-border)', background: 'var(--editor-surface)' }}>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <span className="flex items-center gap-1.5 text-sm font-bold">{t.name}{(t as Tpl).premium && <span className="text-xs">👑</span>}</span>
+                      <span className="flex items-center gap-2">{active && <Check size={16} style={{ color: 'var(--accent)' }} />}<Palette size={15} style={{ color: 'var(--text-muted)' }} /></span>
+                    </div>
+                    <button onClick={() => { setStyle((s) => ({ ...s, ...t.patch })); setAppliedTpl(t.name); if ((t as Tpl).patch.emColor) autoEmphasize(); markDirty(); previewFromHere(); toast.success(`${t.name} applied`); }} className="w-full px-4 pb-3">
+                      <TplPreview t={t as Tpl} big />
+                    </button>
+                    {active && (
+                      <div className="space-y-3 border-t px-4 py-3" style={{ borderColor: 'var(--editor-border)' }}>
+                        <div>
+                          <p className="mb-1.5 text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Layout</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Toggle2 on={style.layout === 'splash'} onClick={() => patchGlobal({ layout: 'splash' })}><LayoutGrid size={14} /> Splash</Toggle2>
+                            <Toggle2 on={style.layout === 'center'} onClick={() => patchGlobal({ layout: 'center' })}><AlignCenter size={14} /> Center</Toggle2>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="mb-1.5 text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Colors</p>
+                          <ColorRow label="Primary" value={style.color} onChange={(v) => patchGlobal({ color: v })} onReset={() => patchGlobal({ color: DEFAULT_STYLE.color })} />
+                        </div>
+                        <div className="surface space-y-2 p-3" style={{ background: 'var(--editor-panel)' }}>
+                          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Emphasis</p>
+                          <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-surface)' }}>
+                            <Tab2 on={style.emphasisMode === 'emphasize'} onClick={() => patchGlobal({ emphasisMode: 'emphasize' })}>Emphasize</Tab2>
+                            <Tab2 on={style.emphasisMode === 'spotlight'} onClick={() => patchGlobal({ emphasisMode: 'spotlight' })}>Spotlight</Tab2>
+                          </div>
+                          <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-surface)' }}>
+                            <Tab2 on={style.emColorMode === 'solid'} onClick={() => patchGlobal({ emColorMode: 'solid' })}><Circle size={12} /> Solid</Tab2>
+                            <Tab2 on={style.emColorMode === 'gradient'} onClick={() => patchGlobal({ emColorMode: 'gradient' })}><Palette size={12} /> Gradient</Tab2>
+                          </div>
+                          <ColorRow label="Color" value={style.emColor} onChange={(v) => patchGlobal({ emColor: v })} onReset={() => patchGlobal({ emColor: DEFAULT_STYLE.emColor })} />
+                        </div>
+                        <button onClick={() => { setStyle(DEFAULT_STYLE); setWordStyles({}); setAppliedTpl(null); markDirty(); }} className="btn-primary w-full !py-2.5 text-sm">Remove Style</button>
+                      </div>
+                    )}
                   </div>
-                </button>
-              );
-            })}
+                );
+              })}
+            {tplTab === 'presets' && presets.length === 0 && <p className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>No presets yet. Style a caption, then “Save preset”.</p>}
           </div>
         )}
 
         {tab === 'transitions' && (
-          <div>
-            <p className="mb-3 text-sm font-semibold">Applied on <span style={{ color: 'var(--accent)' }}>{tlMode === 'line' ? 'Line' : 'Word'}</span></p>
+          <div className="space-y-4">
+            <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+              <Tab2 on={trMode === 'line'} onClick={() => setTrMode('line')}>Line</Tab2>
+              <Tab2 on={trMode === 'word'} onClick={() => setTrMode('word')}>Word</Tab2>
+            </div>
+            <p className="text-sm font-semibold">Transitions will be <span style={{ color: 'var(--accent)' }}>Applied</span> on {trMode === 'line' ? 'Line' : 'Word'}</p>
+            {trMode === 'line' && (
+              <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
+                <Tab2 on={trScope === 'all'} onClick={() => setTrScope('all')}>Apply to All</Tab2>
+                <Tab2 on={trScope === 'line'} onClick={() => { if (selLine >= 0) setTrScope('line'); else toast('Select a caption first', { icon: 'ℹ️' }); }}>This Caption</Tab2>
+              </div>
+            )}
+            {trMode === 'word' && selWords.size === 0 && <p className="text-xs" style={{ color: '#f5b74f' }}>Please select one or more words to apply animations</p>}
             <div className="grid grid-cols-3 gap-3">
-              {(dbTransitions.length > 0 ? dbTransitions : TRANSITIONS).map((tr: any, idx: number) => {
-                const trId = tr.id || tr.name?.toLowerCase().replace(/\s+/g, '-') || `t${idx}`;
-                const on = style.transition === trId;
+              {TRANSITIONS.map((tr) => {
+                const cur = trMode === 'line'
+                  ? (trScope === 'line' && selLine >= 0 ? effLine(selLine).transition : style.transition)
+                  : style.wordTransition;
+                const on = cur === tr.id;
                 return (
-                  <button key={trId} onClick={() => patchStyle({ transition: trId })} className="surface grid aspect-square place-items-center gap-2 p-2 text-center transition"
-                    style={{ background: 'var(--editor-surface)', borderColor: on ? 'var(--accent)' : 'var(--editor-border)' }}>
-                    <span className="grid h-9 w-9 place-items-center rounded-full" style={{ background: 'var(--editor-panel)' }}><span className="h-3.5 w-3.5 rounded-sm" style={{ background: on ? 'var(--accent)' : 'var(--text-muted)' }} /></span>
-                    <span className="text-[11px] font-semibold leading-tight">{tr.name}</span>
+                  <button key={tr.id} onClick={() => {
+                    if (trMode === 'line') {
+                      if (trScope === 'line' && selLine >= 0) patchLine(selLine, { transition: tr.id });
+                      else {
+                        patchGlobal({ transition: tr.id });
+                        // "Apply to All": clear per-line transition overrides so it's truly universal
+                        setSegments((prev) => prev.map((s) => (s.style?.transition !== undefined ? { ...s, style: { ...s.style, transition: undefined } } : s)));
+                      }
+                    } else {
+                      if (selWords.size) patchWords({ wordTransition: tr.id } as any); else patchGlobal({ wordTransition: tr.id });
+                    }
+                    previewFromHere(trMode === 'line' && trScope === 'line' && selLine >= 0 ? selLine : undefined);
+                  }}
+                    className="grid aspect-square place-items-center gap-1.5 rounded-2xl border p-2 text-center transition"
+                    style={{ background: 'var(--editor-panel)', borderColor: on ? 'var(--accent)' : 'transparent' }}>
+                    <TrIcon id={tr.id} on={on} />
+                    <span className="text-[10px] font-semibold leading-tight" style={{ color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{tr.name}</span>
                   </button>
                 );
               })}
             </div>
+            <div className="flex items-center justify-between pt-2">
+              <div><p className="text-sm font-semibold" style={{ color: 'var(--text-muted)' }}>Speed Mode <span style={{ color: 'var(--accent)' }}>● {style.speedMode === 'dynamic' ? 'Dynamic' : 'Manual'}</span></p>
+                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{style.speedMode === 'dynamic' ? 'Automatically calculated based on timing' : 'Set your preferred speed manually'}</p></div>
+              <Switch on={style.speedMode === 'dynamic'} onClick={() => patchGlobal({ speedMode: style.speedMode === 'dynamic' ? 'manual' : 'dynamic' })} />
+            </div>
+            {style.speedMode === 'manual' && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Speed</span>
+                <input type="range" min={10} max={100} value={style.speed} onChange={(e) => patchGlobal({ speed: Number(e.target.value) })} className="flex-1" />
+                <div className="surface w-14 px-2 py-1.5 text-center text-sm" style={{ background: 'var(--editor-panel)' }}>{style.speed}</div>
+              </div>
+            )}
+            <button onClick={() => { setBump((n) => n + 1); const s = segments[Math.max(0, activeIdx)]; if (s) seekTo(s.start + 0.01); }} className="btn-ghost w-full !py-2 text-xs">Preview transition</button>
           </div>
         )}
 
@@ -601,148 +1158,254 @@ export default function EditorPage() {
           <div className="space-y-4 text-center">
             <span className="surface inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold" style={{ background: 'var(--editor-panel)', color: 'var(--accent)' }}><Sparkles size={13} /> AI-Powered</span>
             <h3 className="text-xl font-extrabold">Audio Enhancement</h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Clean up your audio, remove background noise & enhance overall quality.</p>
-            <button onClick={cleanAudio} className="btn-primary w-full !py-3"><Wand2 size={16} /> Clean Audio</button>
-            <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-muted)' }}><span>• Noise Reduction</span><span>• Voice Enhancement</span><span>• Normalize</span></div>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Clean up your audio, Remove Background Noise &amp; Enhance Overall Audio Quality.</p>
+            <p className="text-xs font-semibold italic" style={{ color: 'var(--text-muted)' }}>Audio Enhancement Removes Background Music as well!</p>
             <div className="surface flex items-center gap-3 p-3 text-left" style={{ background: 'var(--editor-panel)' }}>
-              <Sparkles size={16} style={{ color: 'var(--accent)' }} />
-              <div><p className="text-sm font-bold">Remaining Credits</p><p className="text-xs" style={{ color: 'var(--text-muted)' }}>{Math.max(0, 100 - (user?.usage.audioCleansUsed || 0))} credits available</p></div>
+              <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ background: cleanOn ? 'var(--accent)' : 'var(--editor-surface)', color: cleanOn ? '#fff' : 'var(--text-muted)' }}><SpeakerIcon size={18} /></span>
+              <div className="flex-1"><p className="text-sm font-bold">AI Audio Cleaning</p><p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{cleanOn ? 'AI enhancement is active' : 'Playing original audio'}</p></div>
+              <Switch on={cleanOn} onClick={toggleClean} />
+            </div>
+            <div className="surface p-4" style={{ background: 'var(--editor-panel)' }}>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="flex items-center gap-2 text-xs font-semibold" style={{ color: cleanOn ? 'var(--accent)' : 'var(--text-muted)' }}><span className="h-2 w-2 rounded-full" style={{ background: cleanOn ? 'var(--accent)' : 'var(--text-muted)' }} />{cleanOn ? 'Enhanced Audio' : 'Original Audio'}</span>
+                <Zap size={14} style={{ color: cleanOn ? 'var(--accent)' : 'var(--text-muted)' }} />
+              </div>
+              <div className="flex h-16 items-center gap-[2px]">
+                {waveHeights(46).map((h, i) => (<span key={i} className="flex-1 rounded-full" style={{ height: `${(cleanOn ? h * 1.25 : h) * 100}%`, background: cleanOn ? 'var(--accent)' : 'var(--text-muted)', opacity: cleanOn ? 0.9 : 0.4, transition: 'all .25s' }} />))}
+              </div>
+              <p className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>Press play and toggle to A/B before vs after.</p>
+            </div>
+            <div className="surface flex items-center gap-3 p-3 text-left" style={{ background: 'var(--editor-panel)' }}>
+              <span className="grid h-9 w-9 place-items-center rounded-xl" style={{ background: 'var(--editor-surface)' }}><Zap size={15} style={{ color: '#f5b74f' }} /></span>
+              <div><p className="text-sm font-bold">Remaining Credits</p><p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{Math.max(0, 100 - (user?.usage.audioCleansUsed || 0))} credits available</p></div>
             </div>
           </div>
         )}
       </div>
 
       <div className="border-t p-3" style={{ borderColor: 'var(--editor-border)' }}>
-        <button onClick={downloadVideo} disabled={videoDownloading} className="btn-primary w-full !py-3 disabled:opacity-60">
-          {videoDownloading ? <><Loader2 size={16} className="animate-spin" /> Rendering… {exportPct}%</> : <><Download size={16} /> Download Video</>}
-        </button>
+        <button onClick={() => setExportOpen(true)} className="btn-primary w-full !py-3">Export</button>
       </div>
     </div>
   );
 
-  const blocks = tlMode === 'line'
-    ? segments.map((s, i) => ({ key: s.id ?? i, i, start: s.start, end: s.end, text: s.text }))
-    : segments.flatMap((s, i) => {
-        const words = s.text.split(/\s+/).filter(Boolean);
-        const span = (s.end - s.start) / Math.max(words.length, 1);
-        return words.map((w, wi) => ({ key: `${s.id ?? i}-${wi}`, i, start: s.start + wi * span, end: s.start + (wi + 1) * span, text: w }));
-      });
-  const heights = waveHeights(Math.max(60, Math.floor(totalDur * 3)));
-  const tlWidth = Math.max(totalDur * pxPerSec, 600);
+  /* ── timeline blocks ── */
+  const heights = waveHeights(Math.max(80, Math.floor(totalDur * 4)));
+  const tlWidth = Math.max(totalDur * pxPerSec, 800);
+  const fitW = wrapBox.w && wrapBox.h ? Math.max(220, Math.min(wrapBox.w, wrapBox.h * vRatio)) : 640;
+  const fitH = fitW / vRatio;
+
+  const toggleWord = (key: string, additive: boolean) => {
+    setSelLine(-1);
+    setSelWords((prev) => {
+      const n = new Set(additive ? prev : []);
+      if (prev.has(key) && additive) n.delete(key); else n.add(key);
+      return n;
+    });
+  };
+
+  /* drag a caption block's edge in the timeline to change its start/end time */
+  const startEdge = (e: React.PointerEvent, i: number, side: 'start' | 'end') => {
+    e.stopPropagation(); e.preventDefault();
+    const s0 = segments[i]; if (!s0) return;
+    const sx = e.clientX; const st0 = s0.start, en0 = s0.end;
+    const move = (ev: PointerEvent) => {
+      const dt = (ev.clientX - sx) / pxPerSec;
+      setSegments((prev) => prev.map((s, x) => {
+        if (x !== i) return s;
+        if (side === 'start') return { ...s, start: Math.max(0, Math.min(en0 - 0.15, st0 + dt)) };
+        return { ...s, end: Math.min(totalDur, Math.max(st0 + 0.15, en0 + dt)) };
+      }));
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); markDirty(); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--editor-bg)', color: 'var(--text)' }}>
       <header className="flex items-center justify-between gap-3 border-b px-3 py-2.5 sm:px-4" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button onClick={() => router.push('/dashboard/projects')} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ background: 'var(--editor-panel)' }}><ArrowLeft size={18} /></button>
-          <div className="min-w-0">
-            <input value={title} onChange={(e) => { setTitle(e.target.value); markDirty(); }} className="w-full truncate bg-transparent text-base font-extrabold outline-none sm:text-lg" />
-            <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{project?.status === 'ready' ? 'Ready to edit' : 'Processing…'}</p>
-          </div>
+          <input value={title} onChange={(e) => { setTitle(e.target.value); markDirty(); }} className="min-w-0 flex-1 truncate bg-transparent text-base font-extrabold outline-none sm:text-lg" />
         </div>
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <button onClick={() => download(segments.map((s) => s.text).join('\n'), `${safeName}.txt`)} className="btn-ghost !px-2.5 !py-2 text-xs"><FileText size={14} /><span className="hidden sm:inline"> TXT</span></button>
-          <button onClick={() => download(buildSrt(segments), `${safeName}.srt`)} className="btn-ghost !px-2.5 !py-2 text-xs"><Download size={14} /><span className="hidden sm:inline"> SRT</span></button>
+          <button onClick={() => dl(segments.map((s) => shown(s)).join('\n'), `${safeName}.txt`)} className="btn-ghost !px-2.5 !py-2 text-xs"><FileText size={14} /><span className="hidden sm:inline"> TXT</span></button>
+          <button onClick={() => dl(buildSrt(segments), `${safeName}.srt`)} className="btn-ghost !px-2.5 !py-2 text-xs"><Download size={14} /><span className="hidden sm:inline"> SRT</span></button>
           <button onClick={save} disabled={!dirty || saving} className="btn-primary !px-3 !py-2 text-xs disabled:opacity-50">{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}<span className="hidden sm:inline"> Save</span></button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-72 shrink-0 border-r lg:block" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>{CaptionRail}</aside>
-
-        <main className="flex min-w-0 flex-1 flex-col">
-          <div className="editor-scroll min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-            <div ref={stageRef} className="relative mx-auto aspect-video w-full max-w-3xl overflow-hidden rounded-2xl border bg-black" style={{ borderColor: 'var(--editor-border)' }}>
-              {project?.videoUrl ? (
-                <>
-                  <video ref={videoRef} src={project.videoUrl} crossOrigin="anonymous" onTimeUpdate={onTime} playsInline className="h-full w-full object-contain" />
-                  <canvas ref={canvasRef} className="hidden" />
-                </>
-              ) : (
-                <div className="grid h-full place-items-center text-sm" style={{ color: 'var(--text-muted)' }}>Video preview unavailable</div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1">
+            <aside className="hidden w-[340px] shrink-0 border-r lg:block" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>{CaptionRail}</aside>
+            <main className="flex min-w-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
+            <div ref={wrapRef} className="flex min-h-0 flex-1 items-center justify-center">
+            <div ref={stageRef} className="relative overflow-hidden rounded-2xl border bg-black" style={{ borderColor: 'var(--editor-border)', width: fitW, height: fitH }}>
+              {project?.videoUrl ? (<><video ref={videoRef} src={project.videoUrl} crossOrigin="anonymous" onTimeUpdate={onTime} onClick={togglePlay} playsInline className="h-full w-full cursor-pointer object-contain" /><canvas ref={canvasRef} className="hidden" /></>)
+                : (<div className="grid h-full place-items-center text-sm" style={{ color: 'var(--text-muted)' }}>Video preview unavailable</div>)}
+              {!playing && project?.videoUrl && (
+                <button onClick={togglePlay} className="absolute inset-0 z-[4] grid place-items-center transition hover:opacity-90" style={{ background: 'rgba(0,0,0,.18)' }}>
+                  <span className="grid h-16 w-16 place-items-center rounded-full" style={{ background: 'var(--accent)', color: '#fff', boxShadow: '0 10px 32px rgba(0,0,0,.45)' }}><Play size={26} className="ml-1" /></span>
+                </button>
               )}
-              <div className="absolute left-3 top-3"><span className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: 'rgba(0,0,0,.55)', color: '#fff' }}><RefreshCw size={12} /> Replace</span></div>
+              <div className="absolute left-3 top-3"><span className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: 'rgba(0,0,0,.55)', color: '#fff' }}><RotateCcw size={12} /> Replace</span></div>
               <div className="absolute right-3 top-3"><span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: 'rgba(0,0,0,.55)', color: '#f5b74f' }}>● Low-res</span></div>
-              {overlayText ? (
-                <div key={`${activeIdx}-${style.transition}`} style={overlayWrap}>
-                  <span className={ANIM_CLASS[style.transition]} style={overlayInner}>{overlayText}</span>
+
+              {activeSeg && activeWords.length > 0 && (
+                <div key={`${activeIdx}-${lineSt.transition}-${bump}`} style={overlayWrap} onPointerDown={onCapPointerDown} title="Drag to reposition">
+                  <span className={lineAnim} style={{ ...boxStyle, animationDuration: `${animDur(lineSt, activeSeg)}s` }}>
+                    {activeWords.map((w) => {
+                      const ws = wordStyles[w.key] || {};
+                      const wtr = (ws as any).wordTransition || style.wordTransition;
+                      return (<span key={w.key} className={ANIM[wtr] || ''} style={{ ...wordSpan(w), ...(wtr && wtr !== 'none' ? { animationDelay: `${w.wi * 0.07}s` } : {}) }}>{w.text}</span>);
+                    })}
+                  </span>
+                  {selLine === activeIdx && (
+                    <>
+                      {([[-1, -1, 'nwse'], [1, -1, 'nesw'], [-1, 1, 'nesw'], [1, 1, 'nwse']] as [number, number, string][]).map(([hx, hy, cur]) => (
+                        <span key={`c${hx}${hy}`} onPointerDown={(e) => startBoxResize(e, 'corner', hx, hy)}
+                          className="absolute z-10 h-3 w-3 rounded-full border-2 border-white"
+                          style={{ background: 'var(--accent)', cursor: `${cur}-resize`,
+                            left: hx < 0 ? -7 : undefined, right: hx > 0 ? -7 : undefined,
+                            top: hy < 0 ? -7 : undefined, bottom: hy > 0 ? -7 : undefined }} />
+                      ))}
+                      {[-1, 1].map((hx) => (
+                        <span key={`s${hx}`} onPointerDown={(e) => startBoxResize(e, 'width', hx, 0)}
+                          className="absolute z-10 h-5 w-2.5 -translate-y-1/2 rounded-sm border-2 border-white"
+                          style={{ background: 'var(--accent)', cursor: 'ew-resize', top: '50%',
+                            left: hx < 0 ? -7 : undefined, right: hx > 0 ? -7 : undefined }} />
+                      ))}
+                    </>
+                  )}
                 </div>
-              ) : (
-                <div style={overlayWrap}><span style={{ ...overlayInner, color: 'var(--text-muted)', background: 'rgba(0,0,0,.4)' }}>Preview appears here</span></div>
               )}
             </div>
-
-            <div className="mx-auto mt-3 flex max-w-3xl items-center gap-3 rounded-2xl border px-3 py-2.5" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>
-              <button onClick={togglePlay} className="grid h-10 w-10 place-items-center rounded-full" style={{ background: 'var(--accent)', color: '#fff' }}>{playing ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}</button>
-              <button onClick={toggleMute} className="grid h-9 w-9 place-items-center rounded-full" style={{ background: 'var(--editor-panel)' }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
-              <div className="font-mono text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}><span style={{ color: 'var(--text)' }}>{tc(current)}</span> / {tc(totalDur)}</div>
-              <input type="range" min={0} max={totalDur} step={0.01} value={current} onChange={(e) => seekTo(Number(e.target.value))} className="flex-1" />
-              <button onClick={goFullscreen} className="grid h-9 w-9 place-items-center rounded-full" style={{ background: 'var(--editor-panel)' }}><Maximize2 size={16} /></button>
             </div>
 
-            <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center gap-2 lg:max-w-none">
-              <div className="surface flex p-0.5" style={{ background: 'var(--editor-panel)' }}>
+            <div className="mx-auto mt-3 w-full max-w-2xl shrink-0 rounded-2xl border px-3 pb-2.5 pt-2.5" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>
+              <input
+                type="range" min={0} max={totalDur || 1} step={0.01} value={Math.min(current, totalDur || 1)}
+                onChange={(e) => seekTo(Number(e.target.value))}
+                className="seekbar mb-2.5 w-full"
+                style={{ background: `linear-gradient(to right, var(--text) ${((Math.min(current, totalDur || 1)) / (totalDur || 1)) * 100}%, var(--editor-border) 0%)` }}
+              />
+              <div className="flex items-center gap-3">
+                <button onClick={togglePlay} className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: 'var(--accent)', color: '#fff' }}>{playing ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}</button>
+              <button onClick={toggleMute} className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: 'var(--editor-panel)' }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
+              <div className="surface px-4 py-2 font-mono text-xs tabular-nums" style={{ background: 'var(--editor-panel)', color: 'var(--text-muted)' }}>
+                <span style={{ color: 'var(--text)' }}>{tc(current)}</span> / {tc(totalDur)}
+              </div>
+              <div className="flex-1" />
+              <button onClick={fs} className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: 'var(--editor-panel)' }}><Maximize2 size={16} /></button>
+              </div>
+            </div>
+            </main>
+          </div>
+
+          {/* full-width editor band: toolbar + timeline (spans under captions + video) */}
+          <div className="border-t px-3 pb-2 pt-3 sm:px-4" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex rounded-xl p-0.5" style={{ background: 'var(--editor-panel)' }}>
                 {(['word', 'line'] as const).map((m) => (
-                  <button key={m} onClick={() => setTlMode(m)} className="rounded-lg px-3 py-1.5 text-xs font-bold uppercase transition" style={tlMode === m ? { background: 'var(--editor-surface)', color: 'var(--text)' } : { color: 'var(--text-muted)' }}>{m}</button>
+                  <button key={m} onClick={() => { setTlMode(m); setSelWords(new Set()); }} className="rounded-lg px-4 py-1.5 text-xs font-bold uppercase transition"
+                    style={tlMode === m ? { background: 'var(--editor-surface)', color: 'var(--text)' } : { color: 'var(--text-muted)' }}>{m}</button>
                 ))}
               </div>
-              <button onClick={addLineAtPlayhead} className="btn-ghost !px-3 !py-1.5 text-xs"><Plus size={14} /> {tlMode === 'line' ? 'Line' : 'Word'}</button>
+              <button onClick={addLine} className="btn-ghost !px-3 !py-1.5 text-xs"><Plus size={14} /> {tlMode === 'line' ? 'Line' : 'Word'}</button>
               <div className="mx-1 h-6 w-px" style={{ background: 'var(--editor-border)' }} />
-              <button onClick={() => { const prev = [...blocks].reverse().find((x) => x.end < current); if (prev) seekTo(prev.start); }} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><ChevronLeft size={15} /></button>
-              <button onClick={() => { const b = blocks.find((x) => x.start > current); if (b) seekTo(b.start); }} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><ChevronRight size={15} /></button>
+              <button onClick={() => { const s = [...segments].reverse().find((x) => x.end < current); if (s) seekTo(s.start); }} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><ChevronLeft size={15} /></button>
+              <button onClick={() => { const s = segments.find((x) => x.start > current); if (s) seekTo(s.start); }} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><ChevronRight size={15} /></button>
+              <button onClick={() => { if (selLine >= 0) removeSeg(selLine); }} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><Trash2 size={15} /></button>
               <div className="ml-auto flex items-center gap-2">
-                <button onClick={() => setPxPerSec((z) => Math.max(8, z - 6))} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><ZoomOut size={15} /></button>
-                <input type="range" min={8} max={80} value={pxPerSec} onChange={(e) => setPxPerSec(Number(e.target.value))} className="w-24" />
-                <button onClick={() => setPxPerSec((z) => Math.min(80, z + 6))} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><ZoomIn size={15} /></button>
+                <button onClick={() => setPxPerSec((z) => Math.max(4, z - 8))} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><ZoomOut size={15} /></button>
+                <input type="range" min={4} max={220} value={pxPerSec} onChange={(e) => setPxPerSec(Number(e.target.value))} className="w-28" />
+                <button onClick={() => setPxPerSec((z) => Math.min(220, z + 8))} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}><ZoomIn size={15} /></button>
               </div>
             </div>
 
+            {/* timeline */}
             <div className="mt-3 rounded-2xl border" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>
-              <div ref={timelineRef} className="editor-scroll relative overflow-x-auto"
-                onClick={(e) => { const el = timelineRef.current; if (!el) return; const rect = el.getBoundingClientRect(); const x = e.clientX - rect.left + el.scrollLeft; seekTo(Math.max(0, Math.min(totalDur, x / pxPerSec))); }}>
-                <div className="relative" style={{ width: tlWidth, minHeight: 150 }}>
-                  <div className="relative h-6 border-b" style={{ borderColor: 'var(--editor-border)' }}>
-                    {Array.from({ length: Math.ceil(totalDur / 5) + 1 }).map((_, i) => (<span key={i} className="absolute top-1 text-[10px] tabular-nums" style={{ left: i * 5 * pxPerSec + 4, color: 'var(--text-muted)' }}>{clock(i * 5)}</span>))}
+              <div ref={tlRef} className="editor-scroll relative overflow-x-auto"
+                onClick={(e) => { const el = tlRef.current; if (!el) return; const r = el.getBoundingClientRect(); const x = e.clientX - r.left + el.scrollLeft; seekTo(Math.max(0, Math.min(totalDur, x / pxPerSec))); }}>
+                <div className="relative" style={{ width: tlWidth, minHeight: 190 }}>
+                  <div className="relative h-7 border-b" style={{ borderColor: 'var(--editor-border)' }}>
+                    {Array.from({ length: Math.ceil(totalDur / 5) + 1 }).map((_, i) => (
+                      <span key={i} className="absolute top-1.5 text-[10px] tabular-nums" style={{ left: i * 5 * pxPerSec + 4, color: 'var(--text-muted)' }}>{clockLbl(i * 5)}</span>
+                    ))}
                   </div>
-                  <div className="relative h-16 border-b" style={{ borderColor: 'var(--editor-border)' }}>
-                    {blocks.map((b) => {
-                      const on = b.i === activeIdx;
-                      return (
-                        <button key={b.key} onClick={(e) => { e.stopPropagation(); setSelectedIdx(b.i); seekTo(b.start); }} className="absolute top-3 flex items-center overflow-hidden rounded-md px-1 text-[10px] font-semibold transition" title={b.text}
-                          style={{ left: b.start * pxPerSec, width: Math.max(6, (b.end - b.start) * pxPerSec - 2), height: 34, background: on ? 'var(--accent)' : 'var(--editor-block)', color: on ? '#fff' : 'var(--text)', fontFamily: withScript("'Inter', sans-serif") }}>
-                          <span className="truncate">{b.text}</span>
-                        </button>
-                      );
-                    })}
+
+                  <div className="relative h-[72px] border-b" style={{ borderColor: 'var(--editor-border)' }}>
+                    {tlMode === 'word'
+                      ? allWords.map((w) => {
+                          const sel = selWords.has(w.key);
+                          const live = current >= w.start && current <= w.end;
+                          const em = !!(wordStyles[w.key] as any)?.emphasized;
+                          return (
+                            <button key={w.key} onClick={(e) => { e.stopPropagation(); toggleWord(w.key, e.metaKey || e.ctrlKey || e.shiftKey); seekTo(w.start); }}
+                              className="absolute top-4 flex items-center justify-center overflow-hidden rounded-md px-1 text-[10px] font-semibold"
+                              title={w.text}
+                              style={{ left: w.start * pxPerSec, width: Math.max(7, (w.end - w.start) * pxPerSec - 2), height: 40,
+                                background: em ? '#C8FF00' : 'var(--editor-block)', color: em ? '#000' : 'var(--text)',
+                                outline: sel ? '2px solid var(--accent)' : live ? '1px solid var(--accent)' : 'none',
+                                fontFamily: withScript("'Inter',sans-serif") }}>
+                              <span className="truncate">{w.text}</span>
+                            </button>
+                          );
+                        })
+                      : segments.map((s, i) => {
+                          const on = i === activeIdx, sel = i === selLine;
+                          return (
+                            <div key={s.id} onClick={(e) => { e.stopPropagation(); setSelLine(i); setSelWords(new Set()); seekTo(s.start); }}
+                              className="absolute top-4 flex cursor-pointer items-center rounded-md text-[10px] font-semibold" title={s.text}
+                              style={{ left: s.start * pxPerSec, width: Math.max(12, (s.end - s.start) * pxPerSec - 2), height: 40,
+                                background: on ? 'var(--accent)' : 'var(--editor-block)', color: on ? '#fff' : 'var(--text)',
+                                outline: sel ? '2px solid var(--accent)' : 'none', fontFamily: withScript("'Inter',sans-serif") }}>
+                              <span onPointerDown={(e) => startEdge(e, i, 'start')} className="h-full w-1.5 shrink-0 cursor-ew-resize rounded-l-md" style={{ background: 'rgba(255,255,255,.28)' }} />
+                              <span className="min-w-0 flex-1 truncate px-1">{shown(s)}</span>
+                              <span onPointerDown={(e) => startEdge(e, i, 'end')} className="h-full w-1.5 shrink-0 cursor-ew-resize rounded-r-md" style={{ background: 'rgba(255,255,255,.28)' }} />
+                            </div>
+                          );
+                        })}
                   </div>
-                  <div className="flex h-14 items-center gap-px" style={{ background: 'var(--editor-panel)' }}>
-                    {heights.map((h, i) => (<span key={i} className="inline-block rounded-full" style={{ width: Math.max(1, tlWidth / heights.length - 1), height: `${h * 100}%`, background: 'var(--accent)', opacity: 0.55 }} />))}
+
+                  <div className="flex h-20 items-center gap-px px-px" style={{ background: 'var(--editor-panel)' }}>
+                    {heights.map((h, i) => (<span key={i} className="inline-block rounded-full" style={{ width: Math.max(1, tlWidth / heights.length - 1), height: `${h * 100}%`, background: 'var(--accent)', opacity: 0.6 }} />))}
                   </div>
+
                   <div className="pointer-events-none absolute inset-y-0" style={{ left: current * pxPerSec }}>
                     <div className="h-full w-0.5" style={{ background: 'var(--accent)' }} />
-                    <div className="absolute -top-0.5 -left-1.5 h-3 w-3 rounded-sm" style={{ background: 'var(--accent)' }} />
+                    <div className="absolute -left-2 -top-0.5 h-3.5 w-4" style={{ background: 'var(--accent)', clipPath: 'polygon(0 0,100% 0,50% 100%)' }} />
                   </div>
                 </div>
               </div>
             </div>
+
+            {tlMode === 'word' && (
+              <p className="mt-2 text-center text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                Click a word to style it · Ctrl/Cmd-click to select several · {selWords.size} selected
+              </p>
+            )}
           </div>
 
           <div className="flex items-center justify-around border-t p-2 lg:hidden" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>
-            <button onClick={() => setMobilePanel('captions')} className="flex flex-col items-center gap-0.5 px-4 py-1 text-[11px] font-semibold" style={{ color: 'var(--text-muted)' }}><CaptionsIcon size={18} /> Captions</button>
+            <button onClick={() => setMobilePanel('captions')} className="flex flex-col items-center gap-0.5 px-4 py-1 text-[11px] font-semibold" style={{ color: 'var(--text-muted)' }}><FileText size={18} /> Captions</button>
             <button onClick={togglePlay} className="grid h-11 w-11 place-items-center rounded-full" style={{ background: 'var(--accent)', color: '#fff' }}>{playing ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}</button>
             <button onClick={() => setMobilePanel('inspector')} className="flex flex-col items-center gap-0.5 px-4 py-1 text-[11px] font-semibold" style={{ color: 'var(--text-muted)' }}><Sparkles size={18} /> Style</button>
           </div>
-        </main>
+        </div>
 
-        <aside className="hidden w-80 shrink-0 border-l lg:block" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>{Inspector}</aside>
+        <aside className="hidden w-[380px] shrink-0 border-l lg:block" style={{ borderColor: 'var(--editor-border)', background: 'var(--editor-surface)' }}>{Inspector}</aside>
       </div>
+
+      {LineStyling}
 
       {mobilePanel !== 'none' && (
         <div className="fixed inset-0 z-[60] lg:hidden" onClick={() => setMobilePanel('none')}>
           <div className="absolute inset-0 bg-black/50" />
-          <div className="absolute inset-x-0 bottom-0 top-16 flex flex-col rounded-t-3xl border-t" style={{ background: 'var(--editor-surface)', borderColor: 'var(--editor-border)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-x-0 bottom-0 top-14 flex flex-col rounded-t-3xl border-t" style={{ background: 'var(--editor-surface)', borderColor: 'var(--editor-border)' }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3">
-              <span className="flex items-center gap-2 text-sm font-bold">{mobilePanel === 'captions' ? <><PanelLeft size={16} /> Captions</> : <><PanelRight size={16} /> Style</>}</span>
+              <span className="text-sm font-bold">{mobilePanel === 'captions' ? 'Captions' : 'Style'}</span>
               <button onClick={() => setMobilePanel('none')} className="grid h-8 w-8 place-items-center rounded-full" style={{ background: 'var(--editor-panel)' }}><X size={16} /></button>
             </div>
             <div className="min-h-0 flex-1">{mobilePanel === 'captions' ? CaptionRail : Inspector}</div>
@@ -753,17 +1416,122 @@ export default function EditorPage() {
   );
 }
 
-/* ─────────────────────────── small UI atoms ─────────────────────────── */
+/* ══════════════════════ UI atoms ══════════════════════ */
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (<div><p className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>{title}</p><div className="space-y-3">{children}</div></div>);
+function Group({ title, open, onToggle, children }: { title: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <div>
+      <button onClick={onToggle} className="mb-2 flex w-full items-center gap-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {title}
+      </button>
+      {open && <div className="space-y-3">{children}</div>}
+    </div>
+  );
 }
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (<label className="block"><span className="mb-1 block text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>{label}</span>{children}</label>);
+function IconBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return <button onClick={onClick} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: 'var(--editor-panel)' }}>{children}</button>;
 }
-function Toggle({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (<button onClick={onClick} className="grid place-items-center rounded-xl border py-2 transition" style={{ background: active ? 'var(--accent)' : 'var(--editor-panel)', color: active ? '#fff' : 'var(--text)', borderColor: active ? 'var(--accent)' : 'var(--editor-border)' }}>{children}</button>);
+function Stepper({ label, value, onPrev, onNext, onReset, bold }: { label: string; value: string; onPrev: () => void; onNext: () => void; onReset: () => void; bold?: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-[76px] shrink-0 text-sm" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <div className="surface flex-1 px-3 py-2 text-sm" style={{ background: 'var(--editor-panel)', fontWeight: bold ? 800 : 500 }}>{value}</div>
+      <div className="flex flex-col">
+        <button onClick={onNext} className="grid h-[18px] w-7 place-items-center rounded-t-md" style={{ background: 'var(--editor-panel)' }}><ChevronUp size={11} /></button>
+        <button onClick={onPrev} className="grid h-[18px] w-7 place-items-center rounded-b-md" style={{ background: 'var(--editor-panel)' }}><ChevronDown size={11} /></button>
+      </div>
+      <IconBtn onClick={onReset}><RotateCcw size={13} /></IconBtn>
+    </div>
+  );
+}
+function Seg2({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <button onClick={onClick} className="grid h-8 w-9 place-items-center rounded-lg transition" style={{ background: on ? 'var(--editor-surface)' : 'transparent', color: on ? 'var(--text)' : 'var(--text-muted)' }}>{children}</button>;
+}
+function Tab2({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <button onClick={onClick} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition" style={{ background: on ? 'var(--editor-surface)' : 'transparent', color: on ? 'var(--text)' : 'var(--text-muted)' }}>{children}</button>;
+}
+function Toggle2({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <button onClick={onClick} className="flex items-center justify-center gap-2 rounded-xl border py-3 text-xs font-semibold" style={{ background: 'var(--editor-panel)', borderColor: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--text)' : 'var(--text-muted)' }}>{children}</button>;
+}
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (<div className="flex items-center gap-2"><span className="w-[86px] shrink-0 text-sm" style={{ color: 'var(--text-muted)' }}>{label}</span><div className="flex-1">{children}</div></div>);
+}
+function ColorRow({ label, value, onChange, onReset }: { label: string; value: string; onChange: (v: string) => void; onReset: () => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-16 shrink-0 text-sm" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <div className="surface flex flex-1 items-center gap-2 px-2 py-1.5" style={{ background: 'var(--editor-panel)' }}>
+        <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="h-6 w-7 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0" />
+        <span className="text-sm" style={{ color: 'var(--text-muted)' }}>#</span>
+        <input value={value.replace('#', '').toUpperCase()} onChange={(e) => onChange('#' + e.target.value.replace('#', ''))} className="w-full bg-transparent text-sm font-mono outline-none" />
+      </div>
+      <IconBtn onClick={onReset}><RotateCcw size={13} /></IconBtn>
+    </div>
+  );
+}
+function SliderRow({ label, min, max, step, value, onChange, onReset }: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; onReset: () => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-[92px] shrink-0 text-sm" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="flex-1" />
+      <div className="surface w-14 px-2 py-1.5 text-center text-sm" style={{ background: 'var(--editor-panel)' }}>{step < 1 ? value.toFixed(1) : value}</div>
+      <IconBtn onClick={onReset}><RotateCcw size={13} /></IconBtn>
+    </div>
+  );
+}
+function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="relative h-6 w-11 shrink-0 rounded-full transition" style={{ background: on ? 'var(--accent)' : 'var(--editor-border)' }}>
+      <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" style={{ left: on ? 22 : 2 }} />
+    </button>
+  );
 }
 function SwitchRow({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
-  return (<button onClick={onClick} className="flex w-full items-center justify-between py-1.5"><span className="text-sm">{label}</span><span className="relative h-5 w-9 rounded-full transition" style={{ background: on ? 'var(--accent)' : 'var(--editor-border)' }}><span className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all" style={{ left: on ? 18 : 2 }} /></span></button>);
+  return (<div className="flex items-center justify-between py-1"><span className="text-sm" style={{ color: 'var(--text-muted)' }}>{label}</span><Switch on={on} onClick={onClick} /></div>);
+}
+function ToolRow({ title, desc, onClick, busy, icon: Icon = Eraser }: { title: string; desc: string; onClick: () => void; busy?: boolean; icon?: any }) {
+  return (
+    <button onClick={onClick} disabled={busy} className="surface flex w-full items-center gap-3 p-3 text-left transition hover:opacity-90 disabled:opacity-60" style={{ background: 'var(--editor-panel)', borderColor: 'var(--editor-border)' }}>
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: 'var(--editor-surface)' }}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Icon size={15} style={{ color: 'var(--text-muted)' }} />}</span>
+      <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{title}</span><span className="block text-[11px] leading-tight" style={{ color: 'var(--text-muted)' }}>{desc}</span></span>
+      <span className="pointer-events-none"><Switch on={false} onClick={() => {}} /></span>
+    </button>
+  );
+}
+function TplPreview({ t, big }: { t: Tpl; big?: boolean }) {
+  const p = t.patch;
+  const emColor = p.emColor || '#C8FF00';
+  const base: React.CSSProperties = {
+    fontFamily: withScript(p.fontFamily || "'Inter',sans-serif"),
+    fontWeight: (p.fontWeight as number) || 700,
+    fontStyle: p.italic ? 'italic' : 'normal',
+    color: p.colorMode === 'gradient' ? 'transparent' : p.color,
+    backgroundImage: p.colorMode === 'gradient' ? `linear-gradient(90deg, ${p.color}, ${p.color2})` : undefined,
+    WebkitBackgroundClip: p.colorMode === 'gradient' ? 'text' : undefined,
+    textShadow: p.glow ? `0 0 10px ${p.color}, 0 0 20px ${p.color}` : p.dropShadow ? '0 2px 10px rgba(0,0,0,.7)' : undefined,
+    WebkitTextStroke: p.textStroke ? '1px rgba(0,0,0,.9)' : undefined,
+    textTransform: p.uppercase ? 'uppercase' : 'none',
+    fontSize: big ? 20 : 15,
+  };
+  const boxed = p.background;
+  return (
+    <div className="grid place-items-center rounded-xl px-3" style={{ height: big ? 92 : 62, background: 'var(--editor-bg)' }}>
+      <span style={{ ...(boxed ? { background: '#fff', padding: '4px 10px', borderRadius: 8 } : {}) }}>
+        <span style={base}>The quick </span>
+        <span style={{ ...base, color: emColor, backgroundImage: undefined, WebkitTextStroke: undefined }}>brown</span>
+        <span style={base}> fox</span>
+      </span>
+    </div>
+  );
+}
+function TrIcon({ id, on }: { id: string; on: boolean }) {
+  const c = on ? 'var(--accent)' : 'var(--text-muted)';
+  const box = 'grid h-11 w-11 place-items-center rounded-xl';
+  if (id === 'none') return <span className={box}><Ban size={20} style={{ color: c }} /></span>;
+  if (id === 'fade') return <span className={box}><span className="h-6 w-6 rounded" style={{ background: c, filter: 'blur(3px)', opacity: .8 }} /></span>;
+  if (id === 'pop') return <span className={box}><span className="h-5 w-5 rounded-full" style={{ background: c, opacity: .85 }} /></span>;
+  if (id === 'zoom') return <span className={box}><ZoomIcon size={20} style={{ color: c }} /></span>;
+  if (id === 'scale') return <span className={box}><MoveHorizontal size={20} style={{ color: c }} /></span>;
+  if (id === 'slide') return <span className={box}><ChevronsLeft size={20} style={{ color: c }} /></span>;
+  return <span className={box}><ChevronsUp size={20} style={{ color: c }} /></span>;
 }

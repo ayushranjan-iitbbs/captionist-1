@@ -18,14 +18,15 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    // JSON body — the video itself is NOT sent here (Vercel caps request bodies
-    // at 4.5 MB). We only receive its Storage URL and fetch it server-side.
+    // JSON body now — the video itself is NOT sent here (Vercel caps request
+    // bodies at 4.5 MB). We only receive its Storage URL and fetch it server-side.
     const { videoUrl, language, title } = await req.json();
     if (!videoUrl || typeof videoUrl !== 'string') {
       return NextResponse.json({ error: 'videoUrl is required' }, { status: 400 });
     }
 
-    // Only allow the user's own Firebase Storage objects.
+    // Only allow the user's own Firebase Storage objects (prevents abuse of
+    // transcribing arbitrary third-party audio on your bill).
     const looksLikeFirebase = videoUrl.startsWith('https://firebasestorage.googleapis.com/');
     const ownsPath = videoUrl.includes(encodeURIComponent(`captionist/${user.uid}/`)) ||
       videoUrl.includes(`captionist%2F${user.uid}%2F`);
@@ -48,7 +49,8 @@ export async function POST(req: NextRequest) {
     if (!mediaRes.ok) {
       return NextResponse.json({ error: `Could not fetch video (HTTP ${mediaRes.status})` }, { status: 502 });
     }
-    const buffer = Buffer.from(await mediaRes.arrayBuffer());
+    const arrayBuf = await mediaRes.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
 
     if (buffer.byteLength > MAX_BYTES) {
       return NextResponse.json(
@@ -60,7 +62,8 @@ export async function POST(req: NextRequest) {
     const lang = language === 'auto' ? undefined : language;
 
     // Cache: transcribing the same audio again (retries, re-uploads) is free.
-    const hash = crypto.createHash('sha256').update(buffer).update(`|${lang || 'auto'}`).digest('hex');
+    // v2: bumped after adding silence/hallucination filtering — invalidates old cached transcripts
+    const hash = crypto.createHash('sha256').update(buffer).update(`|${lang || 'auto'}|v2`).digest('hex');
     const cacheRef = adminDb.collection(CACHE_COL).doc(hash);
     const cached = await cacheRef.get();
 

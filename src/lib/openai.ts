@@ -34,59 +34,35 @@ export interface TranscriptionResult {
 // OpenAI's Whisper endpoint hard-caps uploads at 25 MB.
 const MAX_BYTES = 25 * 1024 * 1024;
 
-// Maps common language names (and already-valid 2-letter codes) to the
-// ISO-639-1 code Whisper expects via the `language` param.
-const LANG_CODES: Record<string, string> = {
-  english: 'en',
-  spanish: 'es',
-  french: 'fr',
-  german: 'de',
-  italian: 'it',
-  portuguese: 'pt',
-  dutch: 'nl',
-  russian: 'ru',
-  japanese: 'ja',
-  chinese: 'zh',
-  korean: 'ko',
-  arabic: 'ar',
-  hindi: 'hi',
-  turkish: 'tr',
-  polish: 'pl',
-  vietnamese: 'vi',
-  en: 'en',
-  es: 'es',
-  fr: 'fr',
-  de: 'de',
-  it: 'it',
-  pt: 'pt',
-  nl: 'nl',
-  ru: 'ru',
-  ja: 'ja',
-  zh: 'zh',
-  ko: 'ko',
-  ar: 'ar',
-  hi: 'hi',
-  tr: 'tr',
-  pl: 'pl',
-  vi: 'vi',
-};
-
-// Optional priming prompts per language code. Whisper uses the `prompt` field
-// as style/vocabulary context, which also nudges it toward consistent
-// punctuation and casing for that language.
-const PRIMING: Record<string, string> = {
-  en: 'Hello, welcome. This is a transcript with proper punctuation, capitalization, and paragraph breaks.',
-  es: 'Hola, bienvenido. Esta es una transcripcion con puntuacion y mayusculas correctas.',
-  fr: 'Bonjour, bienvenue. Ceci est une transcription avec une ponctuation et des majuscules correctes.',
-  de: 'Hallo, willkommen. Dies ist ein Transkript mit korrekter Zeichensetzung und Grossschreibung.',
-  it: 'Ciao, benvenuto. Questa e una trascrizione con punteggiatura e maiuscole corrette.',
-  pt: 'Ola, bem-vindo. Esta e uma transcricao com pontuacao e maiusculas corretas.',
-};
-
 /**
  * Transcribe an audio/video file with Whisper, returning verbose JSON with
  * per-segment timings (needed for the caption editor + SRT export).
  */
+// Map the language NAMES the UI sends (from LANGUAGES) to Whisper ISO-639-1 codes.
+// Whisper ignores an invalid value like "hindi" and silently auto-detects, which
+// drops quiet segments — pinning the real code fixes accuracy.
+const LANG_CODES: Record<string, string> = {
+  hindi: 'hi', english: 'en', nepali: 'ne', urdu: 'ur', tamil: 'ta',
+  malayalam: 'ml', gujarati: 'gu', bengali: 'bn', punjabi: 'pa', telugu: 'te',
+  sindhi: 'sd', marathi: 'mr', kannada: 'kn', pushto: 'ps', pashto: 'ps', malay: 'ms',
+};
+
+// Short in-script priming samples bias Whisper toward the right language/script
+// and improve continuity so it doesn't skip low-volume speech.
+const PRIMING: Record<string, string> = {
+  hi: 'नमस्ते। यह एक कहानी है। ध्यान से सुनिए।',
+  mr: 'नमस्कार. ही एक गोष्ट आहे.',
+  ne: 'नमस्ते। यो एउटा कथा हो।',
+  ur: 'یہ ایک کہانی ہے۔',
+  bn: 'এটি একটি গল্প।',
+  ta: 'இது ஒரு கதை.',
+  te: 'ఇది ఒక కథ.',
+  ml: 'ഇതൊരു കഥയാണ്.',
+  gu: 'આ એક વાર્તા છે.',
+  kn: 'ಇದು ಒಂದು ಕಥೆ.',
+  pa: 'ਇਹ ਇੱਕ ਕਹਾਣੀ ਹੈ।',
+};
+
 export async function transcribeFile(
   file: File,
   language?: string
@@ -96,8 +72,9 @@ export async function transcribeFile(
 }
 
 /**
- * Transcribe a raw audio/video buffer with Whisper, returning verbose JSON
- * with per-segment timings (needed for the caption editor + SRT export).
+ * Transcribe raw bytes (used server-side after downloading the media from
+ * Firebase Storage, so the video never has to pass through the API request
+ * body — which on Vercel is capped at 4.5 MB).
  */
 export async function transcribeBuffer(
   buffer: Buffer,
@@ -113,14 +90,7 @@ export async function transcribeBuffer(
   }
 
   const openai = getOpenAI();
-
-  // Convert the raw Buffer into an upload via the SDK's own toFile() helper.
-  // A materialized Buffer with an explicit filename produces a clean,
-  // correctly-sized request (passing a raw Web File can break multipart
-  // streaming on Node/Windows and surface as APIConnectionError / ECONNRESET).
-  const upload = await toFile(buffer, filename || 'audio.mp4', {
-    type: type || 'video/mp4',
-  });
+  const upload = await toFile(buffer, filename || 'audio.mp4', { type: type || 'video/mp4' });
 
   const langInput = (language || '').toLowerCase().trim();
   const langCode = LANG_CODES[langInput] || (langInput.length === 2 ? langInput : undefined);
@@ -138,60 +108,103 @@ export async function transcribeBuffer(
       ...(prompt ? { prompt } : {}),
     });
   } catch (e: any) {
-    // Surface the REAL underlying reason instead of the SDK's opaque
-    // "Connection error." — e.cause typically holds ETIMEDOUT / ENOTFOUND /
-    // ECONNRESET / certificate errors when the request can't reach OpenAI.
     const cause = e?.cause?.code || e?.cause?.message || e?.code;
     const status = e?.status ? ` (HTTP ${e.status})` : '';
     const detail = cause ? ` [${cause}]` : '';
     throw new Error(`OpenAI request failed${status}${detail}: ${e?.message || 'unknown error'}`);
   }
 
-  // verbose_json shape
   const r = resp as unknown as {
     language?: string;
     duration?: number;
     text: string;
-    segments?: Array<{ id: number; start: number; end: number; text: string }>;
+    segments?: Array<{
+      id: number; start: number; end: number; text: string;
+      no_speech_prob?: number; avg_logprob?: number; compression_ratio?: number;
+    }>;
   };
 
-  // Filter and clean segments: remove empty segments and very short leading silence
-  let segments = (r.segments || [])
-    .map((s) => ({
-      id: s.id,
-      start: s.start,
-      end: s.end,
-      text: s.text.trim(),
-    }))
-    .filter((s) => s.text.length > 0); // Remove empty segments
-
-  // If segments exist, ensure they start at 0 or adjust first segment
-  // This handles cases where there's silence before the actual content starts
-  if (segments.length > 0 && segments[0].start > 0) {
-    segments[0] = { ...segments[0], start: 0 };
-  }
-
-  const fullText = (r.text || '').trim();
-  const joinedText = segments.map((s) => s.text).join(' ').replace(/\s+/g, ' ').trim();
-  const rawWords = fullText ? fullText.split(/\s+/).length : 0;
-  const segmentWords = joinedText ? joinedText.split(/\s+/).length : 0;
-
-  // If segment coverage is incomplete, fall back to a single full-text segment
-  if (fullText && segmentWords / Math.max(rawWords, 1) < 0.9) {
-    segments = [{
-      id: 0,
-      start: 0,
-      end: r.duration || 0,
-      text: fullText,
-    }];
-  }
+  const cleaned = cleanSegments(r.segments || []);
+  const split = splitSegments(cleaned);
 
   return {
     language: r.language || language || 'unknown',
     duration: r.duration || 0,
-    text: fullText,
-    segments,
+    text: split.map((s) => s.text).join(' '),
+    segments: split.map((s, i) => ({ id: i, start: s.start, end: s.end, text: s.text })),
   };
+}
+
+/* ── Accuracy post-processing ─────────────────────────────────────────────
+ * Whisper "hallucinates" text over silence (especially at the very start) and
+ * sometimes repeats. verbose_json gives per-segment confidence we can filter on.
+ */
+const HALLUCINATION_PATTERNS = [
+  /thanks? for watching/i, /please subscribe/i, /subtitles? by/i,
+  /amara\.org/i, /transcription by/i, /^\s*[♪♫\[\](){}]+\s*$/, /www\./i,
+];
+
+function cleanSegments(
+  segs: Array<{ start: number; end: number; text: string; no_speech_prob?: number; avg_logprob?: number; compression_ratio?: number }>
+): Array<{ start: number; end: number; text: string }> {
+  const out: Array<{ start: number; end: number; text: string }> = [];
+  for (const s of segs) {
+    const text = (s.text || '').trim();
+    if (!text) continue;
+
+    const noSpeech = s.no_speech_prob ?? 0;
+    const logprob = s.avg_logprob ?? 0;
+    const compression = s.compression_ratio ?? 1;
+
+    // Non-speech: Whisper is confident this span is silence/noise.
+    if (noSpeech > 0.6 && logprob < -0.4) continue;
+    // Very low confidence overall → likely garbage over quiet audio.
+    if (logprob < -1.0) continue;
+    // Repetition hallucination ("the the the…", looped phrases).
+    if (compression > 2.4) continue;
+    // Known boilerplate Whisper injects on silence.
+    if (HALLUCINATION_PATTERNS.some((re) => re.test(text))) continue;
+    // Degenerate single-token repeats.
+    const words = text.split(/\s+/);
+    if (words.length > 4 && new Set(words.map((w) => w.toLowerCase())).size <= 2) continue;
+
+    out.push({ start: s.start, end: s.end, text });
+  }
+  return out;
+}
+
+/* Break long segments into short, single-line captions (~in sync, like Kalakar).
+ * Timing is distributed across the split lines proportionally to character count. */
+function splitSegments(
+  segs: Array<{ start: number; end: number; text: string }>,
+  maxChars = 32
+): Array<{ start: number; end: number; text: string }> {
+  const out: Array<{ start: number; end: number; text: string }> = [];
+  for (const s of segs) {
+    const dur = Math.max(0.2, s.end - s.start);
+    const text = s.text.trim();
+    if (text.length <= maxChars) { out.push(s); continue; }
+
+    // Greedy word-wrap into <= maxChars chunks.
+    const words = text.split(/\s+/);
+    const chunks: string[] = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (test.length > maxChars && line) { chunks.push(line); line = w; }
+      else line = test;
+    }
+    if (line) chunks.push(line);
+
+    const totalChars = chunks.reduce((a, c) => a + c.length, 0) || 1;
+    let t = s.start;
+    for (const c of chunks) {
+      const slice = (c.length / totalChars) * dur;
+      out.push({ start: t, end: Math.min(s.end, t + slice), text: c });
+      t += slice;
+    }
+  }
+  return out;
 }
 
 /** Convert transcription segments to an SRT string. */

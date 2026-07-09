@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { authFetch } from '@/lib/authFetch';
-import { LANGUAGES } from '@/lib/landingDefaults';
 import { User, Lock, Mail, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -11,7 +10,7 @@ export default function SettingsPage() {
   const { user, refresh } = useAuth();
   const [name, setName] = useState(user?.name || '');
   const [phone, setPhone] = useState(user?.phone?.replace(/^\+91/, '') || '');
-  const [lang, setLang] = useState(user?.preferredLanguage || 'Hindi');
+  const [lang, setLang] = useState(user?.preferredLanguage || 'auto');
   const [savingProfile, setSavingProfile] = useState(false);
 
   const [newEmail, setNewEmail] = useState('');
@@ -86,9 +85,7 @@ export default function SettingsPage() {
           </Field>
           <Field label="Preferred language">
             <select className="input" value={lang} onChange={(e) => setLang(e.target.value)}>
-              {LANGUAGES.map((l) => (
-                <option key={l} value={l}>{l}</option>
-              ))}
+              <option value="auto">Auto‑detect</option>
             </select>
           </Field>
         </div>
