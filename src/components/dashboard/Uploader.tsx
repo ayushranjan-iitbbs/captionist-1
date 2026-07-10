@@ -41,12 +41,26 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
   const start = async () => {
     if (!file) return;
     setBusy(true);
+    let uploadTask: ReturnType<typeof uploadBytesResumable> | null = null;
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) throw new Error('Not signed in');
       const base = `captionist/${uid}/${uuid()}`;
 
-      /* 1) Extract audio in-browser (16 kHz mono MP3, ~8-min chunks).
+      /* 1) Start the video upload IMMEDIATELY (background) — runs in parallel
+            with audio extraction + transcription. */
+      const vref = storageRef(storage, `${base}-${file.name}`);
+      uploadTask = uploadBytesResumable(vref, file);
+      const task = uploadTask;
+      const videoUrlPromise = new Promise<string>((resolve, reject) => {
+        task.on('state_changed',
+          (s) => setUploadPct(Math.round((s.bytesTransferred / s.totalBytes) * 100)),
+          reject,
+          () => { setUploadPct(100); getDownloadURL(vref).then(resolve, reject); });
+      });
+      videoUrlPromise.catch(() => {}); // handled where awaited
+
+      /* 2) Extract audio in-browser (16 kHz mono MP3, ~8-min chunks).
             A 500 MB video becomes a few MB of audio — under Whisper's 25 MB cap. */
       let chunks;
       try {
@@ -54,21 +68,11 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
       } catch (err) {
         console.warn('[uploader] audio extraction failed:', err);
         if (file.size > 24 * 1024 * 1024) {
-          throw new Error('Could not read this video\'s audio in the browser, and the file is too large to transcribe directly. Try a standard H.264/AAC MP4.');
+          task.cancel();
+          throw new Error('Could not decode this video\'s audio in the browser — the file may be too large for this device\'s memory, or uses an unsupported codec. Try desktop Chrome, or a standard H.264/AAC MP4.');
         }
         chunks = null; // small file → legacy direct path below
       }
-
-      /* 2) Upload the ORIGINAL video in the BACKGROUND while transcription runs —
-            total time becomes max(upload, transcribe) instead of their sum. */
-      const vref = storageRef(storage, `${base}-${file.name}`);
-      const task = uploadBytesResumable(vref, file);
-      const videoUrlPromise = new Promise<string>((resolve, reject) => {
-        task.on('state_changed',
-          (s) => setUploadPct(Math.round((s.bytesTransferred / s.totalBytes) * 100)),
-          reject,
-          () => { setUploadPct(100); getDownloadURL(vref).then(resolve, reject); });
-      });
 
       /* 3) Transcribe */
       if (!chunks) {
@@ -132,6 +136,7 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
       setFile(null); onDone?.();
       router.push(`/dashboard/editor/${data.project.id}`);
     } catch (e: any) {
+      try { uploadTask?.cancel(); } catch {}
       toast.error(e?.message || 'Failed to process');
     } finally {
       setBusy(false); setPhase(''); setUploadPct(null);

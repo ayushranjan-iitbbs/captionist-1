@@ -28,22 +28,38 @@ export async function extractAudioChunks(
 
   onProgress?.('Decoding audio…');
   const AC = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext;
-  const probeCtx = new AC();
+  // Decode directly AT 16 kHz: decodeAudioData resamples to the context's rate,
+  // so we never hold full-rate PCM in memory (a 30-min stereo track at 48 kHz
+  // would be ~700 MB of Float32 — at 16 kHz it's ~6x smaller). This is what
+  // made 200-500 MB uploads die with an out-of-memory "cancel".
+  let ctx: AudioContext;
+  try { ctx = new AC({ sampleRate: TARGET_RATE }); } catch { ctx = new AC(); }
   let decoded: AudioBuffer;
   try {
-    decoded = await probeCtx.decodeAudioData(arrayBuf.slice(0));
+    // pass the buffer directly (it gets detached) — no 500 MB slice() copy
+    decoded = await ctx.decodeAudioData(arrayBuf);
   } finally {
-    probeCtx.close().catch(() => {});
+    ctx.close().catch(() => {});
   }
 
-  onProgress?.('Resampling…');
-  const frames = Math.ceil(decoded.duration * TARGET_RATE);
-  const off = new OfflineAudioContext(1, frames, TARGET_RATE);
-  const src = off.createBufferSource();
-  src.buffer = decoded;
-  src.connect(off.destination);
-  src.start();
-  const mono = (await off.startRendering()).getChannelData(0);
+  onProgress?.('Preparing audio…');
+  // Downmix to mono in-place style (no OfflineAudioContext render buffer)
+  const ch0 = decoded.getChannelData(0);
+  let mono: Float32Array;
+  if (decoded.numberOfChannels === 1) {
+    mono = ch0;
+  } else {
+    const ch1 = decoded.getChannelData(1);
+    mono = new Float32Array(ch0.length);
+    for (let i = 0; i < ch0.length; i++) mono[i] = (ch0[i] + ch1[i]) / 2;
+  }
+  // If the browser ignored the 16 kHz context request, decimate manually
+  if (decoded.sampleRate !== TARGET_RATE) {
+    const ratio = decoded.sampleRate / TARGET_RATE;
+    const out = new Float32Array(Math.floor(mono.length / ratio));
+    for (let i = 0; i < out.length; i++) out[i] = mono[Math.floor(i * ratio)];
+    mono = out;
+  }
 
   // Float32 [-1,1] → Int16 PCM
   const pcm = new Int16Array(mono.length);
@@ -65,6 +81,7 @@ export async function extractAudioChunks(
     for (let i = 0; i < slice.length; i += BLOCK) {
       const out = enc.encodeBuffer(slice.subarray(i, i + BLOCK));
       if (out.length) parts.push(new Uint8Array(out));
+      if ((i / BLOCK) % 40 === 0) await new Promise((r) => setTimeout(r, 0)); // keep UI responsive
     }
     const end = enc.flush();
     if (end.length) parts.push(new Uint8Array(end));

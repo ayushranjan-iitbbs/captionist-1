@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { authFetch } from '@/lib/authFetch';
+import { storage, auth as fbAuth } from '@/lib/firebaseClient';
+import { ref as fontStorageRef, uploadBytes as uploadFontBytes, getDownloadURL as getFontDownloadURL } from 'firebase/storage';
 import { useAuth } from '@/context/AuthContext';
 import toast from 'react-hot-toast';
 import type { Project } from '@/types';
@@ -82,16 +84,22 @@ const WEIGHTS = [
 
 interface Tpl { name: string; premium?: boolean; patch: Partial<CapStyle>; }
 const TEMPLATES: Tpl[] = [
-  { name: 'Kalakar', patch: { fontFamily: "'Inter', sans-serif", fontWeight: 900, color: '#FFFFFF', emColor: '#C8FF00', uppercase: true, layout: 'splash', background: false, dropShadow: true } },
-  { name: 'Ali Abdaal', premium: true, patch: { fontFamily: "'Inter', sans-serif", fontWeight: 800, color: '#111827', emColor: '#9CA3AF', background: true, bgColor: '#FFFFFF', uppercase: false, dropShadow: false, layout: 'center' } },
-  { name: 'Clean Motion', patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 700, color: '#FFFFFF', emColor: '#4f8cff', background: false, dropShadow: true, uppercase: false } },
-  { name: 'Mota', premium: true, patch: { fontFamily: "'Archivo Black', sans-serif", fontWeight: 400, color: '#FFFFFF', emColor: '#22c55e', uppercase: true, dropShadow: true, background: false } },
-  { name: 'Tabahi', premium: true, patch: { fontFamily: "'Anton', sans-serif", fontWeight: 400, color: '#FFFFFF', italic: true, uppercase: true, textStroke: true, dropShadow: true, background: false } },
-  { name: 'Deep Glow', premium: true, patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 800, color: '#ff3df0', emColor: '#ffffff', uppercase: true, glow: true, background: false } },
-  { name: 'Seedha Saadha', premium: true, patch: { fontFamily: "'Inter', sans-serif", fontWeight: 900, color: '#FFFFFF', emColor: '#C8FF00', background: true, bgColor: 'rgba(0,0,0,0.92)', uppercase: true } },
-  { name: 'Neon Pop', patch: { fontFamily: "'Bebas Neue', sans-serif", fontWeight: 400, fontSize: 40, color: '#38f5c8', emColor: '#ffffff', uppercase: true, glow: true, background: false } },
-  { name: 'Lower Third', patch: { fontFamily: "'Montserrat', sans-serif", fontWeight: 700, color: '#FFFFFF', background: true, bgColor: 'rgba(0,0,0,0.72)', align: 'left', posX: 22, posY: 88, uppercase: false } },
-  { name: 'Sunset', patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 800, colorMode: 'gradient', color: '#ff8a3d', color2: '#ff3d77', uppercase: true, background: false, dropShadow: true } },
+  /* word-by-word cascade (Kalakar style) */
+  { name: 'Kalakar', patch: { fontFamily: "'Inter', sans-serif", fontWeight: 900, color: '#FFFFFF', emColor: '#C8FF00', uppercase: true, layout: 'splash', background: false, dropShadow: true, transition: 'none', wordTransition: 'pop' } },
+  { name: 'Mota', premium: true, patch: { fontFamily: "'Archivo Black', sans-serif", fontWeight: 400, color: '#FFFFFF', emColor: '#22c55e', uppercase: true, dropShadow: true, background: false, transition: 'none', wordTransition: 'zoom' } },
+  { name: 'Neon Pop', patch: { fontFamily: "'Bebas Neue', sans-serif", fontWeight: 400, fontSize: 40, color: '#38f5c8', emColor: '#ffffff', uppercase: true, glow: true, background: false, transition: 'none', wordTransition: 'pop' } },
+  { name: 'Impact', patch: { fontFamily: "'Archivo Black', sans-serif", fontWeight: 400, color: '#FFD400', emColor: '#FFFFFF', uppercase: true, textStroke: true, dropShadow: true, background: false, transition: 'none', wordTransition: 'pop' } },
+  { name: 'Slide Bold', patch: { fontFamily: "'Oswald', sans-serif", fontWeight: 700, color: '#FFFFFF', emColor: '#ff3d77', uppercase: true, dropShadow: true, background: false, transition: 'none', wordTransition: 'slide' } },
+  { name: 'Deep Glow', premium: true, patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 800, color: '#ff3df0', emColor: '#ffffff', uppercase: true, glow: true, background: false, transition: 'none', wordTransition: 'fade' } },
+  /* whole-line transition */
+  { name: 'Ali Abdaal', premium: true, patch: { fontFamily: "'Inter', sans-serif", fontWeight: 800, color: '#111827', emColor: '#9CA3AF', background: true, bgColor: '#FFFFFF', uppercase: false, dropShadow: false, layout: 'center', transition: 'fade', wordTransition: 'none' } },
+  { name: 'Clean Motion', patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 700, color: '#FFFFFF', emColor: '#4f8cff', background: false, dropShadow: true, uppercase: false, transition: 'slideup', wordTransition: 'none' } },
+  { name: 'Tabahi', premium: true, patch: { fontFamily: "'Anton', sans-serif", fontWeight: 400, color: '#FFFFFF', italic: true, uppercase: true, textStroke: true, dropShadow: true, background: false, transition: 'slide', wordTransition: 'none' } },
+  { name: 'Sunset', patch: { fontFamily: "'Poppins', sans-serif", fontWeight: 800, colorMode: 'gradient', color: '#ff8a3d', color2: '#ff3d77', uppercase: true, background: false, dropShadow: true, transition: 'scale', wordTransition: 'none' } },
+  { name: 'Lower Third', patch: { fontFamily: "'Montserrat', sans-serif", fontWeight: 700, color: '#FFFFFF', background: true, bgColor: 'rgba(0,0,0,0.72)', align: 'left', posX: 22, posY: 88, uppercase: false, transition: 'slideup', wordTransition: 'none' } },
+  /* no transition */
+  { name: 'Seedha Saadha', premium: true, patch: { fontFamily: "'Inter', sans-serif", fontWeight: 900, color: '#FFFFFF', emColor: '#C8FF00', background: true, bgColor: 'rgba(0,0,0,0.92)', uppercase: true, transition: 'none', wordTransition: 'none' } },
+  { name: 'Minimal', patch: { fontFamily: "'Inter', sans-serif", fontWeight: 600, color: '#FFFFFF', emColor: '#4f8cff', background: false, dropShadow: true, uppercase: false, transition: 'none', wordTransition: 'none' } },
 ];
 
 const TRANSITIONS = [
@@ -243,7 +251,7 @@ export default function EditorPage() {
   const [tplTab, setTplTab] = useState<'builtin' | 'presets'>('builtin');
   const [tplSearch, setTplSearch] = useState('');
   const [appliedTpl, setAppliedTpl] = useState<string | null>(null);
-  const [presets, setPresets] = useState<{ name: string; patch: Partial<CapStyle> }[]>([]);
+  const [presets, setPresets] = useState<{ id?: string; name: string; patch: Partial<CapStyle> }[]>([]);
 
   const [exportOpen, setExportOpen] = useState(false);
   const [expType, setExpType] = useState<'video' | 'srt' | 'txt'>('video');
@@ -269,16 +277,53 @@ export default function EditorPage() {
     document.head.appendChild(l);
   }, []);
 
-  /* presets from localStorage */
+  /* presets + custom fonts are stored per-user in Firestore */
   useEffect(() => {
-    try { const raw = localStorage.getItem('captionist:presets'); if (raw) setPresets(JSON.parse(raw)); } catch {}
+    (async () => {
+      try { const r = await authFetch('/api/presets'); if (r.ok) setPresets((await r.json()).presets || []); } catch {}
+      try { const r = await authFetch('/api/fonts'); if (r.ok) setCustomFonts((await r.json()).fonts || []); } catch {}
+    })();
   }, []);
-  const savePreset = () => {
+  const savePreset = async () => {
     const name = prompt('Preset name?'); if (!name) return;
-    const next = [...presets, { name, patch: { ...style } }];
-    setPresets(next);
-    try { localStorage.setItem('captionist:presets', JSON.stringify(next)); } catch {}
-    toast.success('Preset saved');
+    try {
+      const r = await authFetch('/api/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, patch: { ...style } }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Failed');
+      setPresets((p) => [d.preset, ...p]);
+      toast.success('Preset saved to your account');
+    } catch (e: any) { toast.error(e?.message || 'Save failed'); }
+  };
+
+  /* custom fonts: injected as @font-face, available in every dropdown */
+  const [customFonts, setCustomFonts] = useState<{ id: string; name: string; url: string }[]>([]);
+  const fontInputRef = useRef<HTMLInputElement>(null);
+  const [fontBusy, setFontBusy] = useState(false);
+  useEffect(() => {
+    customFonts.forEach((f) => {
+      if (document.querySelector(`style[data-font="${f.id}"]`)) return;
+      const st = document.createElement('style'); st.dataset.font = f.id;
+      st.textContent = `@font-face{font-family:'${f.name}';src:url('${f.url}');font-display:swap;}`;
+      document.head.appendChild(st);
+    });
+  }, [customFonts]);
+  const allFonts = useMemo(() => [...FONTS, ...customFonts.map((f) => ({ label: f.name, family: `'${f.name}'` }))], [customFonts]);
+  const addFont = async (f: File | null) => {
+    if (!f) return;
+    if (!/\.(ttf|otf|woff2?)$/i.test(f.name)) return toast.error('Use a .ttf, .otf or .woff2 font file');
+    if (f.size > 5 * 1024 * 1024) return toast.error('Font must be under 5 MB');
+    setFontBusy(true);
+    try {
+      const uid = fbAuth.currentUser?.uid; if (!uid) throw new Error('Not signed in');
+      const name = f.name.replace(/\.[^.]+$/, '').replace(/['"<>]/g, '').slice(0, 50);
+      const r = fontStorageRef(storage, `captionist/${uid}/fonts/${Date.now()}-${f.name}`);
+      await uploadFontBytes(r, f);
+      const url = await getFontDownloadURL(r);
+      const res = await authFetch('/api/fonts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url }) });
+      const d = await res.json(); if (!res.ok) throw new Error(d.error || 'Failed');
+      setCustomFonts((p) => [d.font, ...p]);
+      toast.success(`Font "${name}" added`);
+    } catch (e: any) { toast.error(e?.message || 'Font upload failed'); }
+    finally { setFontBusy(false); if (fontInputRef.current) fontInputRef.current.value = ''; }
   };
 
   /* load */
@@ -366,17 +411,41 @@ export default function EditorPage() {
     return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchstart', ts); el.removeEventListener('touchmove', tm); el.removeEventListener('touchend', te); };
   }, [loading, pxPerSec]);
 
-  const onTime = useCallback(() => {
-    const t = videoRef.current?.currentTime ?? 0;
-    setCurrent(t);
-    setActiveIdx(segments.findIndex((s) => t >= s.start && t <= s.end));
-  }, [segments]);
+  /* Smooth playback loop: the playhead moves via a ref at 60fps (no React
+     re-render), the active caption switches the instant its word starts, and
+     the clock/seekbar state updates ~10x/s. */
+  const playheadRef = useRef<HTMLDivElement>(null);
+  const pxRef = useRef(pxPerSec); useEffect(() => { pxRef.current = pxPerSec; }, [pxPerSec]);
+  const segsRef = useRef(segments); useEffect(() => { segsRef.current = segments; }, [segments]);
+  const activeRef = useRef(-1);
+  useEffect(() => {
+    let raf = 0; let lastState = 0;
+    const loop = () => {
+      const v = videoRef.current;
+      if (v) {
+        const t = v.currentTime;
+        if (playheadRef.current) playheadRef.current.style.transform = `translateX(${t * pxRef.current}px)`;
+        const segs = segsRef.current;
+        const cur = segs[activeRef.current];
+        if (!(cur && t >= cur.start && t <= cur.end)) {
+          const idx = segs.findIndex((sg) => t >= sg.start && t <= sg.end);
+          if (idx !== activeRef.current) { activeRef.current = idx; setActiveIdx(idx); }
+        }
+        const now = performance.now();
+        if (now - lastState > 100) { lastState = now; setCurrent(t); }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [loading]);
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
     const p = () => setPlaying(true), q = () => setPlaying(false);
     const m = () => { if (v.duration && isFinite(v.duration)) setDuration(v.duration); if (v.videoWidth && v.videoHeight) setVRatio(v.videoWidth / v.videoHeight); };
     v.addEventListener('play', p); v.addEventListener('pause', q); v.addEventListener('loadedmetadata', m);
+    if (v.readyState >= 1) m(); // metadata may already be loaded (cached video) — honor 9:16 / 4:3 immediately
     return () => { v.removeEventListener('play', p); v.removeEventListener('pause', q); v.removeEventListener('loadedmetadata', m); };
   }, [project?.videoUrl]);
 
@@ -650,13 +719,16 @@ export default function EditorPage() {
 
   /* drag caption box on the video to reposition (updates X/Y %) */
   const dragRef = useRef<{ sx: number; sy: number; px: number; py: number; line: number } | null>(null);
+  const dragMovedRef = useRef(false);
   const onCapPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation();
     const rect = stageRef.current?.getBoundingClientRect(); if (!rect || activeIdx < 0) return;
-    setSelLine(activeIdx); setSelWords(new Set());
+    dragMovedRef.current = false;
     dragRef.current = { sx: e.clientX, sy: e.clientY, px: lineSt.posX, py: lineSt.posY, line: activeIdx };
     const apply = (ev: PointerEvent) => {
       const d = dragRef.current; if (!d) return;
+      if (Math.abs(ev.clientX - d.sx) + Math.abs(ev.clientY - d.sy) > 4) dragMovedRef.current = true;
+      if (!dragMovedRef.current) return;
       const nx = Math.min(98, Math.max(2, d.px + ((ev.clientX - d.sx) / rect.width) * 100));
       const ny = Math.min(96, Math.max(4, d.py + ((ev.clientY - d.sy) / rect.height) * 100));
       // Drag moves ALL captions (global) unless this line already has its own position
@@ -665,7 +737,17 @@ export default function EditorPage() {
     };
     let raf = 0; let last: PointerEvent | null = null;
     const move = (ev: PointerEvent) => { last = ev; if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (last) apply(last); }); };
-    const up = () => { if (raf) cancelAnimationFrame(raf); dragRef.current = null; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    const up = (ev: PointerEvent) => {
+      if (raf) cancelAnimationFrame(raf);
+      const line = dragRef.current?.line ?? -1;
+      dragRef.current = null;
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      if (!dragMovedRef.current && !(ev.ctrlKey || ev.metaKey) && line >= 0) {
+        // plain click on the caption box: select the line (a click on a word
+        // fires right after and narrows the selection to that word)
+        setSelLine(line); setSelWords(new Set());
+      }
+    };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
 
@@ -783,7 +865,7 @@ export default function EditorPage() {
         <ToolRow title="Remove Emphasis" desc="Remove all text emphasis for uniform appearance" onClick={rmEmph} />
         <ToolRow title="Remove Gaps in Captions" desc="Eliminate gaps between captions for seamless flow" onClick={rmGaps} />
         <ToolRow title="Remove Emojis" desc="Remove all emojis from captions" onClick={rmEmoji} />
-        <ToolRow title={romanOn ? 'Show Native Script' : 'Show Roman Script'} desc="Transliterate captions between native and Roman" onClick={toggleRoman} busy={romanizing} icon={Languages} />
+        <ToolRow title={romanOn ? 'Show Native Script' : 'Show Roman Script'} desc="Transliterate captions between native and Roman" onClick={toggleRoman} busy={romanizing} on={romanOn} icon={Languages} />
       </div>
 
       <p className="mb-2 mt-5 text-center text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Timing</p>
@@ -816,7 +898,7 @@ export default function EditorPage() {
           </button>
           {collapsed.typo && (
             <div className="space-y-3 border-b px-4 py-3" style={{ borderColor: 'var(--editor-border)' }}>
-              <Row label="Font Family"><select className="input !py-2 text-sm" value={st.fontFamily} onChange={(e) => patchLine(i, { fontFamily: e.target.value })}>{FONTS.map((f) => <option key={f.label} value={f.family}>{f.label}</option>)}</select></Row>
+              <Row label="Font Family"><select className="input !py-2 text-sm" value={st.fontFamily} onChange={(e) => patchLine(i, { fontFamily: e.target.value })}>{allFonts.map((f) => <option key={f.label} value={f.family}>{f.label}</option>)}</select></Row>
               <Row label="Font Face"><select className="input !py-2 text-sm" value={st.fontWeight} onChange={(e) => patchLine(i, { fontWeight: Number(e.target.value) })}>{WEIGHTS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}</select></Row>
               <Row label="Size"><input type="range" min={12} max={72} value={st.fontSize} onChange={(e) => patchLine(i, { fontSize: Number(e.target.value) })} className="w-full" /></Row>
               <Row label="Color"><div className="flex items-center gap-2"><input type="color" value={st.color} onChange={(e) => patchLine(i, { color: e.target.value })} className="h-8 w-10 rounded border-0 bg-transparent" /><input className="input !py-2 text-sm font-mono" value={st.color} onChange={(e) => patchLine(i, { color: e.target.value })} /></div></Row>
@@ -975,14 +1057,24 @@ export default function EditorPage() {
             </div>
 
             <Group title="Fonts" open={collapsed.fonts !== false} onToggle={() => setCollapsed((c) => ({ ...c, fonts: c.fonts === false }))}>
-              <Stepper label="Font Family" value={FONTS.find((f) => f.family === targetStyle.fontFamily)?.label || 'Inter'}
-                onPrev={() => { const i = FONTS.findIndex((f) => f.family === targetStyle.fontFamily); patchTarget({ fontFamily: FONTS[(i - 1 + FONTS.length) % FONTS.length].family }); }}
-                onNext={() => { const i = FONTS.findIndex((f) => f.family === targetStyle.fontFamily); patchTarget({ fontFamily: FONTS[(i + 1) % FONTS.length].family }); }}
-                onReset={() => patchTarget({ fontFamily: DEFAULT_STYLE.fontFamily })} />
-              <Stepper label="Font Face" value={WEIGHTS.find((w) => w.value === targetStyle.fontWeight)?.label || 'Regular'}
-                onPrev={() => { const i = WEIGHTS.findIndex((w) => w.value === targetStyle.fontWeight); patchTarget({ fontWeight: WEIGHTS[(i - 1 + WEIGHTS.length) % WEIGHTS.length].value }); }}
-                onNext={() => { const i = WEIGHTS.findIndex((w) => w.value === targetStyle.fontWeight); patchTarget({ fontWeight: WEIGHTS[(i + 1) % WEIGHTS.length].value }); }}
-                onReset={() => patchTarget({ fontWeight: DEFAULT_STYLE.fontWeight })} />
+              <div className="flex items-center gap-2">
+                <span className="w-[76px] shrink-0 text-sm" style={{ color: 'var(--text-muted)' }}>Font Family</span>
+                <select className="input flex-1 !py-2 text-sm" value={targetStyle.fontFamily} onChange={(e) => patchTarget({ fontFamily: e.target.value })}>
+                  {allFonts.map((f) => <option key={f.label} value={f.family} style={{ fontFamily: f.family }}>{f.label}</option>)}
+                </select>
+                <IconBtn onClick={() => patchTarget({ fontFamily: DEFAULT_STYLE.fontFamily })}><RotateCcw size={13} /></IconBtn>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-[76px] shrink-0 text-sm" style={{ color: 'var(--text-muted)' }}>Font Face</span>
+                <select className="input flex-1 !py-2 text-sm" value={targetStyle.fontWeight} onChange={(e) => patchTarget({ fontWeight: Number(e.target.value) })}>
+                  {WEIGHTS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                </select>
+                <IconBtn onClick={() => patchTarget({ fontWeight: DEFAULT_STYLE.fontWeight })}><RotateCcw size={13} /></IconBtn>
+              </div>
+              <input ref={fontInputRef} type="file" accept=".ttf,.otf,.woff,.woff2" className="hidden" onChange={(e) => addFont(e.target.files?.[0] || null)} />
+              <button onClick={() => fontInputRef.current?.click()} disabled={fontBusy} className="btn-ghost w-full !py-2 text-xs disabled:opacity-60">
+                {fontBusy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Add custom font (.ttf / .otf / .woff2)
+              </button>
               <div className="flex items-center gap-2">
                 <input type="range" min={10} max={90} value={targetStyle.fontSize} onChange={(e) => patchTarget({ fontSize: Number(e.target.value) })} className="flex-1" />
                 <div className="surface flex w-[74px] items-center justify-between px-2 py-1.5 text-sm" style={{ background: 'var(--editor-panel)' }}><span>{targetStyle.fontSize}</span><span className="text-xs" style={{ color: 'var(--text-muted)' }}>px</span></div>
@@ -1051,14 +1143,20 @@ export default function EditorPage() {
                 <div className="surface w-14 px-2 py-1.5 text-center text-sm" style={{ background: 'var(--editor-panel)' }}>{targetStyle.emSize.toFixed(1)}</div>
                 <IconBtn onClick={() => patchTarget({ emSize: DEFAULT_STYLE.emSize })}><RotateCcw size={13} /></IconBtn>
               </div>
-              <Stepper label="Font" value={FONTS.find((f) => f.family === targetStyle.emFont)?.label || 'Inter'}
-                onPrev={() => { const i = FONTS.findIndex((f) => f.family === targetStyle.emFont); patchTarget({ emFont: FONTS[(i - 1 + FONTS.length) % FONTS.length].family }); }}
-                onNext={() => { const i = FONTS.findIndex((f) => f.family === targetStyle.emFont); patchTarget({ emFont: FONTS[(i + 1) % FONTS.length].family }); }}
-                onReset={() => patchTarget({ emFont: DEFAULT_STYLE.emFont })} bold />
-              <Stepper label="Font Face" value={WEIGHTS.find((w) => w.value === targetStyle.emWeight)?.label || 'Black'}
-                onPrev={() => { const i = WEIGHTS.findIndex((w) => w.value === targetStyle.emWeight); patchTarget({ emWeight: WEIGHTS[(i - 1 + WEIGHTS.length) % WEIGHTS.length].value }); }}
-                onNext={() => { const i = WEIGHTS.findIndex((w) => w.value === targetStyle.emWeight); patchTarget({ emWeight: WEIGHTS[(i + 1) % WEIGHTS.length].value }); }}
-                onReset={() => patchTarget({ emWeight: DEFAULT_STYLE.emWeight })} />
+              <div className="flex items-center gap-2">
+                <span className="w-[76px] shrink-0 text-sm" style={{ color: 'var(--text-muted)' }}>Font</span>
+                <select className="input flex-1 !py-2 text-sm" value={targetStyle.emFont} onChange={(e) => patchTarget({ emFont: e.target.value })}>
+                  {allFonts.map((f) => <option key={f.label} value={f.family}>{f.label}</option>)}
+                </select>
+                <IconBtn onClick={() => patchTarget({ emFont: DEFAULT_STYLE.emFont })}><RotateCcw size={13} /></IconBtn>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-[76px] shrink-0 text-sm" style={{ color: 'var(--text-muted)' }}>Font Face</span>
+                <select className="input flex-1 !py-2 text-sm" value={targetStyle.emWeight} onChange={(e) => patchTarget({ emWeight: Number(e.target.value) })}>
+                  {WEIGHTS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                </select>
+                <IconBtn onClick={() => patchTarget({ emWeight: DEFAULT_STYLE.emWeight })}><RotateCcw size={13} /></IconBtn>
+              </div>
               <div className="flex items-center justify-between"><span className="text-sm" style={{ color: 'var(--text-muted)' }}>Emphasis Styles</span>
                 <div className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--editor-panel)' }}>
                   <Seg2 on={targetStyle.emUppercase} onClick={() => patchTarget({ emUppercase: !targetStyle.emUppercase })}><span className="text-sm font-bold">Tt</span></Seg2>
@@ -1324,7 +1422,7 @@ export default function EditorPage() {
             <main className="flex min-w-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
             <div ref={wrapRef} className="flex min-h-0 flex-1 items-center justify-center">
             <div ref={stageRef} className="relative overflow-hidden rounded-2xl border bg-black" style={{ borderColor: 'var(--editor-border)', width: fitW, height: fitH }}>
-              {project?.videoUrl ? (<><video ref={videoRef} src={project.videoUrl} crossOrigin="anonymous" onTimeUpdate={onTime} onClick={togglePlay} playsInline className="h-full w-full cursor-pointer object-contain" /><canvas ref={canvasRef} className="hidden" /></>)
+              {project?.videoUrl ? (<><video ref={videoRef} src={project.videoUrl} crossOrigin="anonymous" onClick={togglePlay} playsInline className="h-full w-full cursor-pointer object-contain" /><canvas ref={canvasRef} className="hidden" /></>)
                 : (<div className="grid h-full place-items-center text-sm" style={{ color: 'var(--text-muted)' }}>Video preview unavailable</div>)}
               {!playing && project?.videoUrl && (
                 <button onClick={togglePlay} className="absolute inset-0 z-[4] grid place-items-center transition hover:opacity-90" style={{ background: 'rgba(0,0,0,.18)' }}>
@@ -1340,7 +1438,28 @@ export default function EditorPage() {
                     {activeWords.map((w) => {
                       const ws = wordStyles[w.key] || {};
                       const wtr = (ws as any).wordTransition || style.wordTransition;
-                      return (<span key={w.key} className={ANIM[wtr] || ''} style={{ ...wordSpan(w), ...(wtr && wtr !== 'none' ? { animationDelay: `${w.wi * 0.07}s` } : {}) }}>{w.text}</span>);
+                      // Each word enters at its spoken moment within the caption.
+                      // Manual Speed Mode scales the pace (lower speed = longer delays).
+                      const scale = lineSt.speedMode === 'manual' ? (110 - lineSt.speed) / 50 : 1;
+                      const delay = activeSeg ? Math.max(0, w.start - activeSeg.start) * scale : w.wi * 0.12 * scale;
+                      const wSel = selWords.has(w.key);
+                      return (
+                        <span
+                          key={w.key}
+                          className={ANIM[wtr] || ''}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (dragMovedRef.current) return; // it was a drag, not a click
+                            toggleWord(w.key, e.ctrlKey || e.metaKey || e.shiftKey);
+                          }}
+                          style={{
+                            ...wordSpan(w),
+                            cursor: 'pointer', pointerEvents: 'auto',
+                            ...(wSel ? { outline: '1.5px dashed var(--accent)', outlineOffset: 2, borderRadius: 4 } : {}),
+                            ...(wtr && wtr !== 'none' ? { animationDelay: `${delay.toFixed(3)}s` } : {}),
+                          }}
+                        >{w.text}</span>
+                      );
                     })}
                   </span>
                   {selLine === activeIdx && (
@@ -1452,7 +1571,7 @@ export default function EditorPage() {
 
                   {waveRow}
 
-                  <div className="pointer-events-none absolute inset-y-0 z-10" style={{ left: current * pxPerSec }}>
+                  <div ref={playheadRef} className="pointer-events-none absolute inset-y-0 z-10" style={{ left: 0, transform: `translateX(${current * pxPerSec}px)`, willChange: 'transform' }}>
                     <div className="h-full w-0.5" style={{ background: 'var(--accent)', boxShadow: '0 0 10px var(--accent)' }} />
                     <div className="absolute -left-2 -top-0.5 h-3.5 w-4" style={{ background: 'var(--accent)', clipPath: 'polygon(0 0,100% 0,50% 100%)' }} />
                   </div>
@@ -1568,18 +1687,20 @@ function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
 function SwitchRow({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
   return (<div className="flex items-center justify-between py-1"><span className="text-sm" style={{ color: 'var(--text-muted)' }}>{label}</span><Switch on={on} onClick={onClick} /></div>);
 }
-function ToolRow({ title, desc, onClick, busy, icon: Icon = Eraser }: { title: string; desc: string; onClick: () => void; busy?: boolean; icon?: any }) {
+function ToolRow({ title, desc, onClick, busy, on = false, icon: Icon = Eraser }: { title: string; desc: string; onClick: () => void; busy?: boolean; on?: boolean; icon?: any }) {
   return (
     <button onClick={onClick} disabled={busy} className="surface flex w-full items-center gap-3 p-3 text-left transition hover:opacity-90 disabled:opacity-60" style={{ background: 'var(--editor-panel)', borderColor: 'var(--editor-border)' }}>
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: 'var(--editor-surface)' }}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Icon size={15} style={{ color: 'var(--text-muted)' }} />}</span>
       <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{title}</span><span className="block text-[11px] leading-tight" style={{ color: 'var(--text-muted)' }}>{desc}</span></span>
-      <span className="pointer-events-none"><Switch on={false} onClick={() => {}} /></span>
+      <span className="pointer-events-none"><Switch on={on} onClick={() => {}} /></span>
     </button>
   );
 }
 function TplPreview({ t, big }: { t: Tpl; big?: boolean }) {
   const p = t.patch;
   const emColor = p.emColor || '#C8FF00';
+  const wt = p.wordTransition && p.wordTransition !== 'none' ? p.wordTransition : null;
+  const lt = p.transition && p.transition !== 'none' ? p.transition : null;
   const base: React.CSSProperties = {
     fontFamily: withScript(p.fontFamily || "'Inter',sans-serif"),
     fontWeight: (p.fontWeight as number) || 700,
@@ -1592,17 +1713,34 @@ function TplPreview({ t, big }: { t: Tpl; big?: boolean }) {
     textTransform: p.uppercase ? 'uppercase' : 'none',
     fontSize: big ? 20 : 15,
   };
-  const boxed = p.background;
+  const words: { text: string; em?: boolean }[] = [{ text: 'The' }, { text: 'quick' }, { text: 'brown', em: true }, { text: 'fox' }];
   return (
-    <div className="grid place-items-center rounded-xl px-3" style={{ height: big ? 92 : 62, background: 'var(--editor-bg)' }}>
-      <span style={{ ...(boxed ? { background: '#fff', padding: '4px 10px', borderRadius: 8 } : {}) }}>
-        <span style={base}>The quick </span>
-        <span style={{ ...base, color: emColor, backgroundImage: undefined, WebkitTextStroke: undefined }}>brown</span>
-        <span style={base}> fox</span>
+    <div className="grid place-items-center overflow-hidden rounded-xl px-3" style={{ height: big ? 92 : 62, background: 'var(--editor-bg)' }}>
+      <span
+        className={!wt && lt ? ANIM[lt] : ''}
+        style={{
+          display: 'inline-block',
+          ...(!wt && lt ? { animationIterationCount: 'infinite', animationDuration: '1.6s' } : {}),
+          ...(p.background ? { background: p.bgColor || '#fff', padding: '4px 10px', borderRadius: 8 } : {}),
+        }}
+      >
+        {words.map((w, i) => (
+          <span
+            key={i}
+            className={wt ? ANIM[wt] : ''}
+            style={{
+              ...base,
+              ...(w.em ? { color: emColor, backgroundImage: undefined, WebkitTextStroke: undefined } : {}),
+              display: 'inline-block', marginRight: '0.28em',
+              ...(wt ? { animationIterationCount: 'infinite', animationDuration: '1.8s', animationDelay: `${i * 0.18}s` } : {}),
+            }}
+          >{w.text}</span>
+        ))}
       </span>
     </div>
   );
 }
+
 function TrIcon({ id, on }: { id: string; on: boolean }) {
   const c = on ? 'var(--accent)' : 'var(--text-muted)';
   const box = 'grid h-11 w-11 place-items-center rounded-xl';
