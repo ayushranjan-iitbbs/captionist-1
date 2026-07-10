@@ -192,7 +192,7 @@ export default function EditorPage() {
   const [activeIdx, setActiveIdx] = useState(-1);
 
   const [tab, setTab] = useState<'text' | 'templates' | 'transitions' | 'audio'>('text');
-  const [tlMode, setTlMode] = useState<'word' | 'line'>('word');
+  const [tlMode, setTlMode] = useState<'word' | 'line'>('line');
   const [trMode, setTrMode] = useState<'line' | 'word'>('line');
   const [pxPerSec, setPxPerSec] = useState(26);
   const [search, setSearch] = useState('');
@@ -282,6 +282,28 @@ export default function EditorPage() {
 
   const totalDur = useMemo(() => duration || segments[segments.length - 1]?.end || 1, [duration, segments]);
   const allWords = useMemo(() => segments.flatMap((s, i) => segWords(s, i)), [segments]);
+
+  /* heavy timeline rows are memoized so drags/typing/timeupdate don't re-render them */
+  const heights = useMemo(() => waveHeights(Math.max(80, Math.floor(totalDur * 4))), [totalDur]);
+  const tlWidth = Math.max(totalDur * pxPerSec, 800);
+  const waveRow = useMemo(() => (
+    <div className="flex h-20 items-center gap-[2px] px-1" style={{ background: 'var(--editor-panel)' }}>
+      {heights.map((h, i) => (<span key={i} className="inline-block rounded-full" style={{ width: Math.max(1.5, tlWidth / heights.length - 2), height: `${h * 100}%`, background: 'linear-gradient(180deg, var(--accent) 0%, rgba(79,140,255,.4) 100%)', opacity: 0.9 }} />))}
+    </div>
+  ), [heights, tlWidth]);
+  const rulerRow = useMemo(() => (
+    <div className="relative h-7 border-b" style={{ borderColor: 'var(--editor-border)' }}>
+      {pxPerSec >= 14 && Array.from({ length: Math.ceil(totalDur) + 1 }).map((_, i) =>
+        i % 5 !== 0 ? (<span key={`t${i}`} className="absolute bottom-0 h-1.5 w-px" style={{ left: i * pxPerSec, background: 'var(--editor-border)' }} />) : null
+      )}
+      {Array.from({ length: Math.ceil(totalDur / 5) + 1 }).map((_, i) => (
+        <span key={i}>
+          <span className="absolute bottom-0 h-2.5 w-px" style={{ left: i * 5 * pxPerSec, background: 'var(--text-muted)' }} />
+          <span className="absolute top-1 text-[10px] tabular-nums" style={{ left: i * 5 * pxPerSec + 4, color: 'var(--text-muted)' }}>{clockLbl(i * 5)}</span>
+        </span>
+      ))}
+    </div>
+  ), [totalDur, pxPerSec]);
 
   /* stage size → font scale identical to export renderer (H/720 * 1.5) */
   const [stageH, setStageH] = useState(0);
@@ -610,7 +632,7 @@ export default function EditorPage() {
     const rect = stageRef.current?.getBoundingClientRect(); if (!rect || activeIdx < 0) return;
     setSelLine(activeIdx); setSelWords(new Set());
     dragRef.current = { sx: e.clientX, sy: e.clientY, px: lineSt.posX, py: lineSt.posY, line: activeIdx };
-    const move = (ev: PointerEvent) => {
+    const apply = (ev: PointerEvent) => {
       const d = dragRef.current; if (!d) return;
       const nx = Math.min(98, Math.max(2, d.px + ((ev.clientX - d.sx) / rect.width) * 100));
       const ny = Math.min(96, Math.max(4, d.py + ((ev.clientY - d.sy) / rect.height) * 100));
@@ -618,7 +640,9 @@ export default function EditorPage() {
       const hasOwn = segments[d.line]?.style?.posX !== undefined || segments[d.line]?.style?.posY !== undefined;
       if (hasOwn) patchLine(d.line, { posX: nx, posY: ny }); else patchGlobal({ posX: nx, posY: ny });
     };
-    const up = () => { dragRef.current = null; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    let raf = 0; let last: PointerEvent | null = null;
+    const move = (ev: PointerEvent) => { last = ev; if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (last) apply(last); }); };
+    const up = () => { if (raf) cancelAnimationFrame(raf); dragRef.current = null; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
 
@@ -630,7 +654,7 @@ export default function EditorPage() {
     const sx = e.clientX, sy = e.clientY;
     const f0 = lineSt.fontSize, w0 = lineSt.boxWidth ?? 92;
     const rect = stageRef.current?.getBoundingClientRect();
-    const move = (ev: PointerEvent) => {
+    const apply = (ev: PointerEvent) => {
       if (kind === 'corner') {
         const d = ((ev.clientX - sx) * dx + (ev.clientY - sy) * dy) / 2;
         patchLine(line, { fontSize: Math.round(Math.min(90, Math.max(10, f0 + d * 0.2))) });
@@ -639,7 +663,9 @@ export default function EditorPage() {
         patchLine(line, { boxWidth: Math.round(Math.min(98, Math.max(18, w0 + d))) });
       }
     };
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    let raf = 0; let last: PointerEvent | null = null;
+    const move = (ev: PointerEvent) => { last = ev; if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (last) apply(last); }); };
+    const up = () => { if (raf) cancelAnimationFrame(raf); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
 
@@ -1193,8 +1219,6 @@ export default function EditorPage() {
   );
 
   /* ── timeline blocks ── */
-  const heights = waveHeights(Math.max(80, Math.floor(totalDur * 4)));
-  const tlWidth = Math.max(totalDur * pxPerSec, 800);
   const fitW = wrapBox.w && wrapBox.h ? Math.max(220, Math.min(wrapBox.w, wrapBox.h * vRatio)) : 640;
   const fitH = fitW / vRatio;
 
@@ -1212,7 +1236,7 @@ export default function EditorPage() {
     e.stopPropagation(); e.preventDefault();
     const s0 = segments[i]; if (!s0) return;
     const sx = e.clientX; const st0 = s0.start, en0 = s0.end;
-    const move = (ev: PointerEvent) => {
+    const apply = (ev: PointerEvent) => {
       const dt = (ev.clientX - sx) / pxPerSec;
       setSegments((prev) => prev.map((s, x) => {
         if (x !== i) return s;
@@ -1220,7 +1244,9 @@ export default function EditorPage() {
         return { ...s, end: Math.min(totalDur, Math.max(st0 + 0.15, en0 + dt)) };
       }));
     };
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); markDirty(); };
+    let raf = 0; let last: PointerEvent | null = null;
+    const move = (ev: PointerEvent) => { last = ev; if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (last) apply(last); }); };
+    const up = () => { if (raf) cancelAnimationFrame(raf); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); markDirty(); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
 
@@ -1231,7 +1257,7 @@ export default function EditorPage() {
     const s0 = segments[i]; if (!s0) return;
     const sx = e.clientX; const st0 = s0.start; const dur = s0.end - s0.start;
     let moved = false;
-    const move = (ev: PointerEvent) => {
+    const apply = (ev: PointerEvent) => {
       const dx = ev.clientX - sx;
       if (Math.abs(dx) > 3) moved = true;
       if (!moved) return;
@@ -1243,7 +1269,10 @@ export default function EditorPage() {
       ns = Math.max(0, Math.min(totalDur - dur, ns));
       setSegments((prev) => prev.map((s, x) => (x === i ? { ...s, start: ns, end: ns + dur } : s)));
     };
+    let raf = 0; let last: PointerEvent | null = null;
+    const move = (ev: PointerEvent) => { last = ev; if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (last) apply(last); }); };
     const up = () => {
+      if (raf) cancelAnimationFrame(raf);
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
       if (moved) markDirty();
       else { setSelLine(i); setSelWords(new Set()); seekTo(segments[i].start); }
@@ -1359,17 +1388,7 @@ export default function EditorPage() {
               <div ref={tlRef} className="editor-scroll relative overflow-x-auto"
                 onClick={(e) => { const el = tlRef.current; if (!el) return; const r = el.getBoundingClientRect(); const x = e.clientX - r.left + el.scrollLeft; seekTo(Math.max(0, Math.min(totalDur, x / pxPerSec))); }}>
                 <div className="relative" style={{ width: tlWidth, minHeight: 190 }}>
-                  <div className="relative h-7 border-b" style={{ borderColor: 'var(--editor-border)' }}>
-                    {pxPerSec >= 14 && Array.from({ length: Math.ceil(totalDur) + 1 }).map((_, i) =>
-                      i % 5 !== 0 ? (<span key={`t${i}`} className="absolute bottom-0 h-1.5 w-px" style={{ left: i * pxPerSec, background: 'var(--editor-border)' }} />) : null
-                    )}
-                    {Array.from({ length: Math.ceil(totalDur / 5) + 1 }).map((_, i) => (
-                      <span key={i}>
-                        <span className="absolute bottom-0 h-2.5 w-px" style={{ left: i * 5 * pxPerSec, background: 'var(--text-muted)' }} />
-                        <span className="absolute top-1 text-[10px] tabular-nums" style={{ left: i * 5 * pxPerSec + 4, color: 'var(--text-muted)' }}>{clockLbl(i * 5)}</span>
-                      </span>
-                    ))}
-                  </div>
+                  {rulerRow}
 
                   <div className="relative h-[72px] border-b" style={{ borderColor: 'var(--editor-border)' }}>
                     {tlMode === 'word'
@@ -1408,9 +1427,7 @@ export default function EditorPage() {
                         })}
                   </div>
 
-                  <div className="flex h-20 items-center gap-[2px] px-1" style={{ background: 'var(--editor-panel)' }}>
-                    {heights.map((h, i) => (<span key={i} className="inline-block rounded-full" style={{ width: Math.max(1.5, tlWidth / heights.length - 2), height: `${h * 100}%`, background: 'linear-gradient(180deg, var(--accent) 0%, rgba(79,140,255,.4) 100%)', opacity: 0.9 }} />))}
-                  </div>
+                  {waveRow}
 
                   <div className="pointer-events-none absolute inset-y-0 z-10" style={{ left: current * pxPerSec }}>
                     <div className="h-full w-0.5" style={{ background: 'var(--accent)', boxShadow: '0 0 10px var(--accent)' }} />
