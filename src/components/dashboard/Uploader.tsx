@@ -6,7 +6,6 @@ import toast from 'react-hot-toast';
 import { ref as storageRef, uploadBytes, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage, auth } from '@/lib/firebaseClient';
 import { v4 as uuid } from 'uuid';
-import { LANGUAGES } from '@/lib/landingDefaults';
 import { useRouter } from 'next/navigation';
 import { extractAudioChunks } from '@/lib/audioExtract';
 
@@ -16,9 +15,10 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
-  const [language, setLanguage] = useState('auto');
+  const language = 'auto'; // Whisper auto-detects; manual selection removed
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState('');
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
 
   const pick = (f: File | null) => {
     if (!f) return;
@@ -59,19 +59,22 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
         chunks = null; // small file → legacy direct path below
       }
 
-      /* 2) Upload the ORIGINAL video (for playback/edit/export) with progress */
+      /* 2) Upload the ORIGINAL video in the BACKGROUND while transcription runs —
+            total time becomes max(upload, transcribe) instead of their sum. */
       const vref = storageRef(storage, `${base}-${file.name}`);
       const task = uploadBytesResumable(vref, file);
-      await new Promise<void>((resolve, reject) => {
+      const videoUrlPromise = new Promise<string>((resolve, reject) => {
         task.on('state_changed',
-          (s) => setPhase(`Uploading video… ${Math.round((s.bytesTransferred / s.totalBytes) * 100)}%`),
-          reject, () => resolve());
+          (s) => setUploadPct(Math.round((s.bytesTransferred / s.totalBytes) * 100)),
+          reject,
+          () => { setUploadPct(100); getDownloadURL(vref).then(resolve, reject); });
       });
-      const videoUrl = await getDownloadURL(vref);
 
       /* 3) Transcribe */
       if (!chunks) {
         // Legacy small-file path: server downloads the video itself
+        setPhase('Uploading…');
+        const videoUrl = await videoUrlPromise;
         setPhase('Transcribing…');
         const res = await fetch('/api/transcribe', {
           method: 'POST', headers: await authHeaders(),
@@ -111,7 +114,9 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
         }
       }
 
-      /* 4) Create the project from the merged transcript */
+      /* 4) Wait for the video upload to complete, then create the project */
+      setPhase('Finishing upload…');
+      const videoUrl = await videoUrlPromise;
       setPhase('Finishing…');
       const res = await fetch('/api/projects', {
         method: 'POST', headers: await authHeaders(),
@@ -129,7 +134,7 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
     } catch (e: any) {
       toast.error(e?.message || 'Failed to process');
     } finally {
-      setBusy(false); setPhase('');
+      setBusy(false); setPhase(''); setUploadPct(null);
     }
   };
 
@@ -157,12 +162,9 @@ export default function Uploader({ onDone }: { onDone?: () => void }) {
             <button onClick={() => setFile(null)} disabled={busy}><X size={18} /></button>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <select value={language} onChange={(e) => setLanguage(e.target.value)} className="input max-w-[200px]" disabled={busy}>
-              <option value="auto">Auto-detect</option>
-              {LANGUAGES.map((l) => (<option key={l} value={l.toLowerCase()}>{l}</option>))}
-            </select>
+            <span className="surface px-4 py-2.5 text-sm" style={{ color: 'var(--text-muted)' }}>Language: Auto-detect</span>
             <button onClick={start} disabled={busy} className="btn-primary">
-              {busy ? (<><Loader2 className="animate-spin" size={18} /> {phase}</>) : 'Generate Captions'}
+              {busy ? (<><Loader2 className="animate-spin" size={18} /> {phase}{uploadPct !== null && uploadPct < 100 ? ` · video ${uploadPct}%` : ''}</>) : 'Generate Captions'}
             </button>
           </div>
         </div>
