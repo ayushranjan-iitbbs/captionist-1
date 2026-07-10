@@ -147,6 +147,25 @@ function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number,
   c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
   c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
 }
+/* split a segment into chunks of at most maxWords words (Kalakar word-style),
+   distributing timing proportionally by character count */
+function splitSegWords(s: Seg, maxWords: number): Seg[] {
+  const words = s.text.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return [s];
+  const dur = Math.max(0.2, s.end - s.start);
+  const totalChars = words.reduce((a, w) => a + w.length, 0) || 1;
+  const chunks: string[][] = [];
+  for (let i = 0; i < words.length; i += maxWords) chunks.push(words.slice(i, i + maxWords));
+  let t = s.start;
+  return chunks.map((c, i) => {
+    const chars = c.reduce((a, w) => a + w.length, 0);
+    const sl = (chars / totalChars) * dur;
+    const seg: Seg = { id: s.id * 1000 + i, start: t, end: Math.min(s.end, t + sl), text: c.join(' '), style: s.style };
+    t += sl;
+    return seg;
+  });
+}
+
 function splitSeg(s: Seg, maxChars: number, lines: number): Seg[] {
   const cap = Math.max(6, maxChars * lines); const text = s.text.trim();
   if (text.length <= cap) return [s];
@@ -216,6 +235,7 @@ export default function EditorPage() {
 
   const [showTools, setShowTools] = useState(false);
   const [maxChars, setMaxChars] = useState(24);
+  const [wordsPer, setWordsPer] = useState<'1' | '2' | '3' | 'chars'>('3');
   const [lineCount, setLineCount] = useState(1);
   const [delay, setDelay] = useState(0);
 
@@ -269,9 +289,9 @@ export default function EditorPage() {
         const { project: p } = await res.json();
         setProject(p); setTitle(p.title);
         const raw: Seg[] = (p.transcript?.segments || []).map((s: any, i: number) => ({ id: s.id ?? i, start: s.start, end: s.end, text: s.text, style: s.style }));
-        // Kalakar-style: one short line at a time — auto-split any long segments
-        const needsSplit = raw.some((s) => s.text.trim().length > 34);
-        setSegments(needsSplit ? raw.flatMap((s) => splitSeg(s, 32, 1)) : raw);
+        // Kalakar-style: 1-3 words per caption — auto-split any longer segments
+        const needsSplit = raw.some((s) => s.text.trim().split(/\s+/).length > 3);
+        setSegments(needsSplit ? raw.flatMap((s) => splitSegWords(s, 3)) : raw);
         if (p.style) setStyle({ ...DEFAULT_STYLE, ...p.style });
         if (p.wordStyles) setWordStyles(p.wordStyles);
         setDuration(p.durationSeconds || 0);
@@ -446,7 +466,10 @@ export default function EditorPage() {
   }, [txtScope, selWords, selLine, segments, wordStyles, style]);
 
   /* ── caption tools ── */
-  const applySplit = () => { setSegments((p) => p.flatMap((s) => splitSeg(s, maxChars, lineCount))); markDirty(); toast.success('Captions re-split'); };
+  const applySplit = () => {
+    setSegments((p) => p.flatMap((s) => (wordsPer === 'chars' ? splitSeg(s, maxChars, lineCount) : splitSegWords(s, Number(wordsPer)))));
+    markDirty(); toast.success('Captions re-split');
+  };
   const rmPunct = () => { setSegments((p) => p.map((s) => ({ ...s, text: s.text.replace(/[.,!?;:"“”‘’—–]/g, '').replace(/\s+/g, ' ').trim() }))); markDirty(); toast.success('Punctuation removed'); };
   const rmEmph = () => { setWordStyles({}); markDirty(); toast.success('Emphasis removed'); };
   const rmEmoji = () => { setSegments((p) => p.map((s) => ({ ...s, text: s.text.replace(EMOJI_RE, '').replace(/\s+/g, ' ').trim() })).filter((s) => s.text)); markDirty(); toast.success('Emojis removed'); };
@@ -746,13 +769,13 @@ export default function EditorPage() {
       <p className="mb-3 text-center text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Display Settings</p>
       <div className="grid grid-cols-3 gap-2">
         <div><label className="mb-1 block text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>Words</label>
-          <select className="input !py-2 text-xs" value={tlMode} onChange={(e) => setTlMode(e.target.value as any)}><option value="word">Default</option><option value="line">Grouped</option></select></div>
+          <select className="input !py-2 text-xs" value={wordsPer} onChange={(e) => setWordsPer(e.target.value as any)}><option value="1">1 word</option><option value="2">2 words</option><option value="3">3 words</option><option value="chars">By chars</option></select></div>
         <div><label className="mb-1 block text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>Max Chars</label>
           <input type="number" className="input !py-2 text-xs" value={maxChars} onChange={(e) => setMaxChars(Math.max(6, Number(e.target.value)))} /></div>
         <div><label className="mb-1 block text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>Lines</label>
           <select className="input !py-2 text-xs" value={lineCount} onChange={(e) => setLineCount(Number(e.target.value))}><option value={1}>1 Line</option><option value={2}>2 Lines</option></select></div>
       </div>
-      <button onClick={applySplit} className="btn-primary mt-3 w-full !py-2 text-xs">Apply ({maxChars} × {lineCount})</button>
+      <button onClick={applySplit} className="btn-primary mt-3 w-full !py-2 text-xs">Apply split{wordsPer === 'chars' ? ` (${maxChars} × ${lineCount})` : ` (${wordsPer} word${wordsPer === '1' ? '' : 's'})`}</button>
 
       <p className="mb-2 mt-5 text-center text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Actions</p>
       <div className="space-y-2">

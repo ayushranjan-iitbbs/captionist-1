@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     }
 
     const lang = language === 'auto' ? undefined : language;
-    const hash = crypto.createHash('sha256').update(buffer).update(`|${lang || 'auto'}|v2`).digest('hex');
+    const hash = crypto.createHash('sha256').update(buffer).update(`|${lang || 'auto'}|v3`).digest('hex');
     const cacheRef = adminDb.collection(CACHE_COL).doc(hash);
     const cached = await cacheRef.get();
 

@@ -102,7 +102,7 @@ export async function transcribeBuffer(
       file: upload,
       model: 'whisper-1',
       response_format: 'verbose_json',
-      timestamp_granularities: ['segment'],
+      timestamp_granularities: ['segment', 'word'],
       temperature: 0,
       ...(langCode ? { language: langCode } : {}),
       ...(prompt ? { prompt } : {}),
@@ -122,10 +122,15 @@ export async function transcribeBuffer(
       id: number; start: number; end: number; text: string;
       no_speech_prob?: number; avg_logprob?: number; compression_ratio?: number;
     }>;
+    words?: Array<{ word: string; start: number; end: number }>;
   };
 
   const cleaned = cleanSegments(r.segments || []);
-  const split = splitSegments(cleaned);
+  const words = (r.words || [])
+    .map((w) => ({ text: (w.word || '').trim(), start: w.start, end: w.end }))
+    .filter((w) => w.text);
+  // Prefer REAL per-word timestamps (exact sync); fall back to char-splitting.
+  const split = words.length ? groupWords(words, cleaned, 3) : splitSegments(cleaned, 20);
 
   return {
     language: r.language || language || 'unknown',
@@ -175,6 +180,33 @@ function cleanSegments(
 
 /* Break long segments into short, single-line captions (~in sync, like Kalakar).
  * Timing is distributed across the split lines proportionally to character count. */
+/* Kalakar-style captions: group REAL word timestamps into 1-3 word chunks,
+ * breaking at punctuation and natural speech pauses. Words falling inside
+ * segments that were filtered out as silence/hallucination are dropped too. */
+function groupWords(
+  words: Array<{ text: string; start: number; end: number }>,
+  kept: Array<{ start: number; end: number; text: string }>,
+  maxWords = 3
+): Array<{ start: number; end: number; text: string }> {
+  const inKept = (t: number) => kept.some((s) => t >= s.start - 0.15 && t <= s.end + 0.15);
+  const ws = words.filter((w) => inKept((w.start + w.end) / 2));
+  const out: Array<{ start: number; end: number; text: string }> = [];
+  let cur: typeof ws = [];
+  const flush = () => {
+    if (!cur.length) return;
+    out.push({ start: cur[0].start, end: cur[cur.length - 1].end, text: cur.map((x) => x.text).join(' ') });
+    cur = [];
+  };
+  for (let i = 0; i < ws.length; i++) {
+    cur.push(ws[i]);
+    const next = ws[i + 1];
+    const gap = next ? next.start - ws[i].end : 0;
+    const punct = /[.!?,;:।]$/.test(ws[i].text);
+    if (cur.length >= maxWords || punct || gap > 0.6 || !next) flush();
+  }
+  return out;
+}
+
 function splitSegments(
   segs: Array<{ start: number; end: number; text: string }>,
   maxChars = 32
